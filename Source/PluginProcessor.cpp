@@ -50,7 +50,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout IngeniumAudioProcessor::crea
         "SINE", "TRIANGLE", "SAW", "SQUARE", "RANDOM"
     };
 
-    const juce::StringArray destinations {
+    const juce::StringArray coreModules {
         "NONE", "AGE", "MELT", "GRAIN", "GHOST", "SMEAR", "CHAOS"
     };
 
@@ -79,8 +79,39 @@ juce::AudioProcessorValueTreeState::ParameterLayout IngeniumAudioProcessor::crea
         layout.add (std::make_unique<juce::AudioParameterChoice> (
             juce::ParameterID { "lfo" + n + "Dest", 1 },
             "LFO " + n + " DESTINATION",
-            destinations,
+            coreModules,
             0));
+    }
+
+    const juce::StringArray matrixModes { "CONTROL", "AUDIO" };
+
+    for (int i = 1; i <= 4; ++i)
+    {
+        const auto n = juce::String (i);
+
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { "matrix" + n + "Source", 1 },
+            "MATRIX " + n + " SOURCE",
+            coreModules,
+            0));
+
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { "matrix" + n + "Dest", 1 },
+            "MATRIX " + n + " TARGET",
+            coreModules,
+            0));
+
+        layout.add (std::make_unique<juce::AudioParameterChoice> (
+            juce::ParameterID { "matrix" + n + "Mode", 1 },
+            "MATRIX " + n + " MODE",
+            matrixModes,
+            0));
+
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { "matrix" + n + "Amount", 1 },
+            "MATRIX " + n + " AMOUNT",
+            juce::NormalisableRange<float> { -1.0f, 1.0f, 0.001f },
+            0.0f));
     }
 
     return layout;
@@ -120,6 +151,9 @@ void IngeniumAudioProcessor::prepareToPlay (double sampleRate, int)
     meltPhase = 0.0;
     chaosPhase = 0.0;
     lfoPhase = { 0.0, 0.0, 0.0 };
+
+    matrixSourceTaps = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    matrixControlState = { 0.0f, 0.0f, 0.0f, 0.0f };
 
     grains = {};
     samplesUntilNextGrain = 0;
@@ -297,6 +331,11 @@ void IngeniumAudioProcessor::advanceLfo (int lfoIndex, float rateHz)
     }
 }
 
+float IngeniumAudioProcessor::monoTap (const std::array<float, 2>& stereo)
+{
+    return std::tanh (0.75f * (stereo[0] + stereo[1]));
+}
+
 void IngeniumAudioProcessor::processBlock (
     juce::AudioBuffer<float>& buffer,
     juce::MidiBuffer&)
@@ -345,6 +384,30 @@ void IngeniumAudioProcessor::processBlock (
             std::round (apvts.getRawParameterValue ("lfo" + n + "Dest")->load()));
     }
 
+    std::array<int, 4> matrixSources {};
+    std::array<int, 4> matrixDests {};
+    std::array<int, 4> matrixModes {};
+    std::array<float, 4> matrixAmounts {};
+
+    for (int route = 0; route < 4; ++route)
+    {
+        const auto n = juce::String (route + 1);
+
+        matrixSources[static_cast<size_t> (route)] = static_cast<int> (
+            std::round (apvts.getRawParameterValue ("matrix" + n + "Source")->load()));
+
+        matrixDests[static_cast<size_t> (route)] = static_cast<int> (
+            std::round (apvts.getRawParameterValue ("matrix" + n + "Dest")->load()));
+
+        matrixModes[static_cast<size_t> (route)] = static_cast<int> (
+            std::round (apvts.getRawParameterValue ("matrix" + n + "Mode")->load()));
+
+        matrixAmounts[static_cast<size_t> (route)] =
+            apvts.getRawParameterValue ("matrix" + n + "Amount")->load();
+    }
+
+    const float controlAlpha = onePoleCoefficient (14.0f, sr);
+
     auto* left = buffer.getWritePointer (0);
     auto* right = buffer.getWritePointer (1);
     const int numSamples = buffer.getNumSamples();
@@ -375,6 +438,42 @@ void IngeniumAudioProcessor::processBlock (
             advanceLfo (lfo, lfoRates[static_cast<size_t> (lfo)]);
         }
 
+        for (int route = 0; route < 4; ++route)
+        {
+            const int source = matrixSources[static_cast<size_t> (route)];
+            const int dest = matrixDests[static_cast<size_t> (route)];
+
+            if (source < 1 || source > 6 || dest < 1 || dest > 6)
+                continue;
+
+            const float raw =
+                matrixSourceTaps[static_cast<size_t> (source - 1)];
+
+            auto& control =
+                matrixControlState[static_cast<size_t> (route)];
+
+            control += controlAlpha * (raw - control);
+
+            const bool audioRate =
+                matrixModes[static_cast<size_t> (route)] == 1;
+
+            const float modSignal =
+                audioRate ? raw : control;
+
+            const float range =
+                audioRate ? 0.24f : 0.48f;
+
+            auto& target =
+                modulated[static_cast<size_t> (dest - 1)];
+
+            target = juce::jlimit (
+                0.0f,
+                1.0f,
+                target + modSignal
+                    * matrixAmounts[static_cast<size_t> (route)]
+                    * range);
+        }
+
         const float age   = modulated[0];
         const float melt  = modulated[1];
         const float grain = modulated[2];
@@ -393,6 +492,8 @@ void IngeniumAudioProcessor::processBlock (
 
         if (chaosPhase >= twoPi)
             chaosPhase -= twoPi;
+
+        matrixSourceTaps[5] = chaosWave;
 
         const int holdPeriod =
             1 + static_cast<int> (std::round (age * age * 14.0f));
@@ -443,6 +544,8 @@ void IngeniumAudioProcessor::processBlock (
             stage[static_cast<size_t> (ch)] = x;
         }
 
+        matrixSourceTaps[0] = monoTap (stage);
+
         for (int ch = 0; ch < 2; ++ch)
         {
             const float x = stage[static_cast<size_t> (ch)];
@@ -463,6 +566,8 @@ void IngeniumAudioProcessor::processBlock (
 
             stage[static_cast<size_t> (ch)] = y;
         }
+
+        matrixSourceTaps[1] = monoTap (stage);
 
         grainBuffer[static_cast<size_t> (grainWrite)] = stage;
 
@@ -536,6 +641,8 @@ void IngeniumAudioProcessor::processBlock (
             stage[1] += (grainSum[1] * norm - stage[1]) * grainWet;
         }
 
+        matrixSourceTaps[2] = monoTap (stage);
+
         for (int ch = 0; ch < 2; ++ch)
         {
             const float x = stage[static_cast<size_t> (ch)];
@@ -587,6 +694,8 @@ void IngeniumAudioProcessor::processBlock (
                 * (smear * 0.78f);
         }
 
+        matrixSourceTaps[4] = monoTap (stage);
+
         const float ghostDelayMs =
             juce::jmap (ghost, 150.0f, 610.0f);
 
@@ -617,6 +726,8 @@ void IngeniumAudioProcessor::processBlock (
             stage[static_cast<size_t> (ch)] +=
                 memory * ghost * 0.52f;
         }
+
+        matrixSourceTaps[3] = monoTap (stage);
 
         const float airAlpha =
             onePoleCoefficient (4300.0f, sr);

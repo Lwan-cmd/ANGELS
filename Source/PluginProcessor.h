@@ -77,6 +77,12 @@ private:
     std::array<float, 3> randomHeld { 0.15f, -0.37f, 0.62f };
     std::array<std::uint32_t, 3> randomState { 0x12345678u, 0x87654321u, 0x31415926u };
 
+    // Previous-sample taps from the six core modules:
+    // AGE, MELT, GRAIN, GHOST, SMEAR, CHAOS.
+    // The one-sample delay intentionally breaks instantaneous feedback loops.
+    std::array<float, 6> matrixSourceTaps { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<float, 4> matrixControlState { 0.0f, 0.0f, 0.0f, 0.0f };
+
     std::array<GrainVoice, 8> grains;
     int samplesUntilNextGrain = 0;
     std::uint32_t grainRandomState = 0x9e3779b9u;
@@ -92,6 +98,8 @@ private:
 
     float getLfoValue (int lfoIndex, int shape) const;
     void advanceLfo (int lfoIndex, float rateHz);
+
+    static float monoTap (const std::array<float, 2>& stereo);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (IngeniumAudioProcessor)
 };
