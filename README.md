@@ -1,25 +1,17 @@
 # INGENIUM
 
-INGENIUM is an experimental audio processor focused on analog instability, granular memory, diffusion, motion and creative modulation.
+Experimental analog-instability / memory processor by LWAN.
 
-Current development build: **v0.7**.
+Current development version: v0.8.
 
-Core modules:
-- AGE — tape-style colour, wear and compression
-- MELT — liquid multi-voice pitch motion
-- GRAIN — granular memory with capture modes
-- GHOST — tempo-synced multi-head echo
-- SMEAR — textured diffusion network
-- CHAOS — stochastic jitter and colour instability
+v0.8 focuses on:
+- true full-wet granular behaviour at maximum GRAIN
+- clearer FLOW / TRANSIENT / GRID granular identities
+- stronger tape-style AGE saturation
+- more analogue character in MELT and GHOST
+- stronger WIDTH / SPACE
+- de-clicked LFO modulation
+- soft bypass crossfade
+- denser six-channel vintage hardware interface with VU meters
 
-Master section:
-- AIR — parallel mid/high presence lift
-- WIDTH — mono-safe M/S widening
-- MIX — global dry/wet
-
-MOD page:
-- 3 LFOs
-- free-rate or host-synced operation
-- target selection for the six core modules
-
-macOS builds target Universal Binary (Apple Silicon + Intel), VST3 and Audio Unit.
+Formats: VST3 + AU, universal macOS build via GitHub Actions.
