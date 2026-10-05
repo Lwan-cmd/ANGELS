@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <algorithm>
 #include <cmath>
 
 namespace
@@ -40,10 +41,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout AngelEngineAudioProcessor::c
     addMacro ("width", "WIDTH", 0.25f);
     addMacro ("melt",  "MELT",  0.30f);
     addMacro ("chaos", "CHAOS", 0.08f);
+    addMacro ("grain", "GRAIN", 0.00f);
     addMacro ("mix",   "MIX",   1.00f);
 
     const juce::StringArray shapes { "SINE", "TRIANGLE", "SAW", "SQUARE", "RANDOM" };
-    const juce::StringArray destinations { "NONE", "AGE", "AIR", "GHOST", "WIDTH", "MELT", "CHAOS" };
+    const juce::StringArray destinations {
+        "NONE", "AGE", "AIR", "GHOST", "WIDTH", "MELT", "CHAOS", "GRAIN"
+    };
 
     for (int i = 1; i <= 3; ++i)
     {
@@ -83,12 +87,15 @@ void AngelEngineAudioProcessor::prepareToPlay (double sampleRate, int)
 
     const auto meltSize = static_cast<int> (std::ceil (sr * 0.060)) + 4;
     const auto ghostSize = static_cast<int> (std::ceil (sr * 2.0)) + 4;
+    const auto grainSize = static_cast<int> (std::ceil (sr * 2.5)) + 4;
 
     meltDelay.assign (static_cast<size_t> (meltSize), { 0.0f, 0.0f });
     ghostDelay.assign (static_cast<size_t> (ghostSize), { 0.0f, 0.0f });
+    grainBuffer.assign (static_cast<size_t> (grainSize), { 0.0f, 0.0f });
 
     meltWrite = 0;
     ghostWrite = 0;
+    grainWrite = 0;
     heldSample = { 0.0f, 0.0f };
     holdCounter = { 0, 0 };
     ageLowpassState = { 0.0f, 0.0f };
@@ -96,6 +103,8 @@ void AngelEngineAudioProcessor::prepareToPlay (double sampleRate, int)
     meltPhase = 0.0;
     chaosPhase = 0.0;
     lfoPhase = { 0.0, 0.0, 0.0 };
+    grains = {};
+    samplesUntilNextGrain = 0;
 }
 
 bool AngelEngineAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -132,9 +141,95 @@ float AngelEngineAudioProcessor::readInterpolated (
     return juce::jmap (frac, a, b);
 }
 
+float AngelEngineAudioProcessor::readCircularAt (double position, int channel) const
+{
+    if (grainBuffer.empty())
+        return 0.0f;
+
+    const auto size = static_cast<int> (grainBuffer.size());
+
+    while (position < 0.0)
+        position += static_cast<double> (size);
+    while (position >= static_cast<double> (size))
+        position -= static_cast<double> (size);
+
+    const int i0 = static_cast<int> (std::floor (position));
+    const int i1 = (i0 + 1) % size;
+    const float frac = static_cast<float> (position - std::floor (position));
+
+    const float a = grainBuffer[static_cast<size_t> (i0)][static_cast<size_t> (channel)];
+    const float b = grainBuffer[static_cast<size_t> (i1)][static_cast<size_t> (channel)];
+    return a + (b - a) * frac;
+}
+
+float AngelEngineAudioProcessor::nextGrainRandom()
+{
+    grainRandomState = grainRandomState * 1664525u + 1013904223u;
+    return static_cast<float> (grainRandomState & 0x00ffffffu)
+         / static_cast<float> (0x00ffffffu);
+}
+
+void AngelEngineAudioProcessor::spawnGrain (float amount)
+{
+    if (grainBuffer.empty() || amount <= 0.0f)
+        return;
+
+    GrainVoice* voice = nullptr;
+
+    for (auto& candidate : grains)
+    {
+        if (! candidate.active)
+        {
+            voice = &candidate;
+            break;
+        }
+    }
+
+    if (voice == nullptr)
+    {
+        voice = &*std::max_element (
+            grains.begin(), grains.end(),
+            [] (const GrainVoice& a, const GrainVoice& b)
+            {
+                return a.ageSamples < b.ageSamples;
+            });
+    }
+
+    const float r1 = nextGrainRandom();
+    const float r2 = nextGrainRandom();
+    const float r3 = nextGrainRandom();
+    const float r4 = nextGrainRandom();
+    const float r5 = nextGrainRandom();
+
+    const float maxLookbackMs = 120.0f + amount * 780.0f;
+    const float lookbackMs = 35.0f + r1 * maxLookbackMs;
+    const float delaySamples = lookbackMs * static_cast<float> (sr) / 1000.0f;
+
+    const float minLengthMs = 24.0f + (1.0f - amount) * 52.0f;
+    const float maxLengthMs = 72.0f + (1.0f - amount) * 110.0f;
+    const float lengthMs = minLengthMs + r2 * (maxLengthMs - minLengthMs);
+
+    const float pitchSpread = 1.0f + amount * 11.0f;
+    float semitones = std::round ((r3 * 2.0f - 1.0f) * pitchSpread);
+    if (amount < 0.12f)
+        semitones = 0.0f;
+
+    const bool reverse = r4 < (0.04f + amount * amount * 0.34f);
+    const double ratio = std::pow (2.0, static_cast<double> (semitones) / 12.0);
+
+    voice->active = true;
+    voice->readPosition = static_cast<double> (grainWrite) - static_cast<double> (delaySamples);
+    voice->increment = reverse ? -ratio : ratio;
+    voice->ageSamples = 0;
+    voice->lengthSamples = juce::jmax (8, static_cast<int> (lengthMs * static_cast<float> (sr) / 1000.0f));
+    voice->pan = (r5 * 2.0f - 1.0f) * juce::jmin (0.75f, amount * 0.75f);
+    voice->gain = 0.72f + (1.0f - amount) * 0.16f;
+}
+
 float AngelEngineAudioProcessor::getLfoValue (int lfoIndex, int shape) const
 {
-    const float norm = static_cast<float> (lfoPhase[static_cast<size_t> (lfoIndex)] / juce::MathConstants<double>::twoPi);
+    const float norm = static_cast<float> (
+        lfoPhase[static_cast<size_t> (lfoIndex)] / juce::MathConstants<double>::twoPi);
 
     switch (shape)
     {
@@ -168,7 +263,8 @@ void AngelEngineAudioProcessor::advanceLfo (int lfoIndex, float rateHz)
 
         auto& state = randomState[static_cast<size_t> (lfoIndex)];
         state = state * 1664525u + 1013904223u;
-        const float unit = static_cast<float> (state & 0x00ffffffu) / static_cast<float> (0x00ffffffu);
+        const float unit = static_cast<float> (state & 0x00ffffffu)
+                         / static_cast<float> (0x00ffffffu);
         randomHeld[static_cast<size_t> (lfoIndex)] = unit * 2.0f - 1.0f;
     }
 }
@@ -178,16 +274,21 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 {
     juce::ScopedNoDenormals noDenormals;
 
-    if (buffer.getNumChannels() < 2 || meltDelay.empty() || ghostDelay.empty())
+    if (buffer.getNumChannels() < 2
+        || meltDelay.empty()
+        || ghostDelay.empty()
+        || grainBuffer.empty())
         return;
 
-    const std::array<float, 6> base {
+    // Macro order here matches the LFO destination list, not the visual order.
+    const std::array<float, 7> base {
         apvts.getRawParameterValue ("age")->load(),
         apvts.getRawParameterValue ("air")->load(),
         apvts.getRawParameterValue ("ghost")->load(),
         apvts.getRawParameterValue ("width")->load(),
         apvts.getRawParameterValue ("melt")->load(),
-        apvts.getRawParameterValue ("chaos")->load()
+        apvts.getRawParameterValue ("chaos")->load(),
+        apvts.getRawParameterValue ("grain")->load()
     };
 
     const float mix = apvts.getRawParameterValue ("mix")->load();
@@ -200,10 +301,14 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (int lfo = 0; lfo < 3; ++lfo)
     {
         const auto n = juce::String (lfo + 1);
-        lfoRates[static_cast<size_t> (lfo)] = apvts.getRawParameterValue ("lfo" + n + "Rate")->load();
-        lfoDepths[static_cast<size_t> (lfo)] = apvts.getRawParameterValue ("lfo" + n + "Depth")->load();
-        lfoShapes[static_cast<size_t> (lfo)] = static_cast<int> (std::round (apvts.getRawParameterValue ("lfo" + n + "Shape")->load()));
-        lfoDests[static_cast<size_t> (lfo)] = static_cast<int> (std::round (apvts.getRawParameterValue ("lfo" + n + "Dest")->load()));
+        lfoRates[static_cast<size_t> (lfo)] =
+            apvts.getRawParameterValue ("lfo" + n + "Rate")->load();
+        lfoDepths[static_cast<size_t> (lfo)] =
+            apvts.getRawParameterValue ("lfo" + n + "Depth")->load();
+        lfoShapes[static_cast<size_t> (lfo)] = static_cast<int> (std::round (
+            apvts.getRawParameterValue ("lfo" + n + "Shape")->load()));
+        lfoDests[static_cast<size_t> (lfo)] = static_cast<int> (std::round (
+            apvts.getRawParameterValue ("lfo" + n + "Dest")->load()));
     }
 
     auto* left = buffer.getWritePointer (0);
@@ -212,18 +317,19 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     for (int i = 0; i < numSamples; ++i)
     {
-        std::array<float, 6> modulated = base;
+        std::array<float, 7> modulated = base;
 
         for (int lfo = 0; lfo < 3; ++lfo)
         {
             const float lfoValue = getLfoValue (lfo, lfoShapes[static_cast<size_t> (lfo)]);
             const int dest = lfoDests[static_cast<size_t> (lfo)];
 
-            if (dest >= 1 && dest <= 6)
+            if (dest >= 1 && dest <= 7)
             {
                 auto& target = modulated[static_cast<size_t> (dest - 1)];
-                target = juce::jlimit (0.0f, 1.0f,
-                                       target + lfoValue * lfoDepths[static_cast<size_t> (lfo)] * 0.50f);
+                target = juce::jlimit (
+                    0.0f, 1.0f,
+                    target + lfoValue * lfoDepths[static_cast<size_t> (lfo)] * 0.50f);
             }
 
             advanceLfo (lfo, lfoRates[static_cast<size_t> (lfo)]);
@@ -235,6 +341,7 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         const float width = modulated[3];
         const float melt  = modulated[4];
         const float chaos = modulated[5];
+        const float grain = modulated[6];
 
         const float dryL = left[i];
         const float dryR = right[i];
@@ -272,9 +379,11 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         if (meltPhase >= twoPi)
             meltPhase -= twoPi;
 
-        std::array<float, 2> processed {};
         const std::array<float, 2> input { dryL, dryR };
+        std::array<float, 2> preGrain {};
 
+        // AGE and MELT happen before the granular memory, so the grain buffer
+        // captures the worn / unstable version of the source rather than raw audio.
         for (int ch = 0; ch < 2; ++ch)
         {
             float x = input[static_cast<size_t> (ch)];
@@ -303,6 +412,85 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
             const float drive = 1.0f + melt * 2.8f + chaos * 0.45f;
             x = std::tanh (x * drive) / std::tanh (drive);
+            preGrain[static_cast<size_t> (ch)] = x;
+        }
+
+        grainBuffer[static_cast<size_t> (grainWrite)] = preGrain;
+
+        if (grain > 0.01f)
+        {
+            if (samplesUntilNextGrain <= 0)
+            {
+                spawnGrain (grain);
+                const float densityHz = 2.5f + grain * 31.5f;
+                samplesUntilNextGrain = juce::jmax (
+                    1, static_cast<int> (static_cast<float> (sr) / densityHz));
+            }
+            else
+            {
+                --samplesUntilNextGrain;
+            }
+        }
+        else
+        {
+            samplesUntilNextGrain = 0;
+        }
+
+        std::array<float, 2> grainAccum { 0.0f, 0.0f };
+        int activeGrains = 0;
+
+        for (auto& voice : grains)
+        {
+            if (! voice.active)
+                continue;
+
+            const int windowDenominator = juce::jmax (1, voice.lengthSamples - 1);
+            const float grainPhase = static_cast<float> (voice.ageSamples)
+                                   / static_cast<float> (windowDenominator);
+            const float window = 0.5f - 0.5f * std::cos (twoPi * grainPhase);
+
+            const float leftGain = 1.0f - juce::jmax (0.0f, voice.pan) * 0.68f;
+            const float rightGain = 1.0f + juce::jmin (0.0f, voice.pan) * 0.68f;
+
+            grainAccum[0] += readCircularAt (voice.readPosition, 0)
+                           * window * voice.gain * leftGain;
+            grainAccum[1] += readCircularAt (voice.readPosition, 1)
+                           * window * voice.gain * rightGain;
+
+            voice.readPosition += voice.increment;
+
+            const double grainSize = static_cast<double> (grainBuffer.size());
+            while (voice.readPosition < 0.0)
+                voice.readPosition += grainSize;
+            while (voice.readPosition >= grainSize)
+                voice.readPosition -= grainSize;
+
+            ++voice.ageSamples;
+            ++activeGrains;
+
+            if (voice.ageSamples >= voice.lengthSamples)
+                voice.active = false;
+        }
+
+        std::array<float, 2> granular = preGrain;
+        if (activeGrains > 0)
+        {
+            const float normalise = 1.0f / std::sqrt (static_cast<float> (activeGrains));
+            granular[0] = grainAccum[0] * normalise;
+            granular[1] = grainAccum[1] * normalise;
+        }
+
+        const float grainWet = grain * 0.82f;
+        std::array<float, 2> processed {
+            preGrain[0] + (granular[0] - preGrain[0]) * grainWet,
+            preGrain[1] + (granular[1] - preGrain[1]) * grainWet
+        };
+
+        // AIR and GHOST operate after the granular section, helping the grains
+        // live in the same spectral and spatial world as the direct signal.
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            float x = processed[static_cast<size_t> (ch)];
 
             airLowpassState[static_cast<size_t> (ch)] +=
                 airLPAlpha * (x - airLowpassState[static_cast<size_t> (ch)]);
@@ -311,8 +499,9 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             x += high * airAmount;
 
             const float ghostRead = readInterpolated (ghostDelay, ghostWrite, ghostDelaySamples, ch);
-            const float feedback = juce::jlimit (0.0f, 0.74f,
-                                                 ghostFeedbackBase + chaos * 0.08f * chaosWave);
+            const float feedback = juce::jlimit (
+                0.0f, 0.74f,
+                ghostFeedbackBase + chaos * 0.08f * chaosWave);
 
             ghostDelay[static_cast<size_t> (ghostWrite)][static_cast<size_t> (ch)] =
                 x + ghostRead * feedback;
@@ -332,6 +521,7 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         meltWrite = (meltWrite + 1) % static_cast<int> (meltDelay.size());
         ghostWrite = (ghostWrite + 1) % static_cast<int> (ghostDelay.size());
+        grainWrite = (grainWrite + 1) % static_cast<int> (grainBuffer.size());
     }
 }
 

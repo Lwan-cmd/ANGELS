@@ -33,16 +33,16 @@ private:
     juce::TextButton mainButton { "MAIN" };
     juce::TextButton modButton { "MOD" };
 
-    std::array<juce::Slider, 7> mainKnobs;
-    std::array<juce::Label, 7> mainLabels;
-    std::array<std::unique_ptr<SliderAttachment>, 7> mainAttachments;
+    std::array<juce::Slider, 8> mainKnobs;
+    std::array<juce::Label, 8> mainLabels;
+    std::array<std::unique_ptr<SliderAttachment>, 8> mainAttachments;
 
-    const std::array<juce::String, 7> mainParameterIDs {
-        "age", "air", "ghost", "width", "melt", "chaos", "mix"
+    const std::array<juce::String, 8> mainParameterIDs {
+        "age", "air", "melt", "grain", "ghost", "width", "chaos", "mix"
     };
 
-    const std::array<juce::String, 7> mainParameterNames {
-        "AGE", "AIR", "GHOST", "WIDTH", "MELT", "CHAOS", "MIX"
+    const std::array<juce::String, 8> mainParameterNames {
+        "AGE", "AIR", "MELT", "GRAIN", "GHOST", "WIDTH", "CHAOS", "MIX"
     };
 
     std::array<juce::Slider, 3> rateKnobs;

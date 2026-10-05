@@ -40,7 +40,10 @@ AngelEngineAudioProcessorEditor::AngelEngineAudioProcessorEditor (
     for (size_t i = 0; i < mainKnobs.size(); ++i)
     {
         styleKnob (mainKnobs[i]);
-        styleLabel (mainLabels[i], mainParameterNames[i], i == 4 ? 13.5f : 12.0f);
+
+        const bool textureMacro = (i == 2 || i == 3);
+        styleLabel (mainLabels[i], mainParameterNames[i], textureMacro ? 13.5f : 12.0f);
+
         addAndMakeVisible (mainKnobs[i]);
         addAndMakeVisible (mainLabels[i]);
 
@@ -48,8 +51,13 @@ AngelEngineAudioProcessorEditor::AngelEngineAudioProcessorEditor (
             audioProcessor.apvts, mainParameterIDs[i], mainKnobs[i]);
     }
 
-    const juce::StringArray shapes { "SINE", "TRIANGLE", "SAW", "SQUARE", "RANDOM" };
-    const juce::StringArray targets { "NONE", "AGE", "AIR", "GHOST", "WIDTH", "MELT", "CHAOS" };
+    const juce::StringArray shapes {
+        "SINE", "TRIANGLE", "SAW", "SQUARE", "RANDOM"
+    };
+
+    const juce::StringArray targets {
+        "NONE", "AGE", "AIR", "GHOST", "WIDTH", "MELT", "CHAOS", "GRAIN"
+    };
 
     for (int i = 0; i < 3; ++i)
     {
@@ -140,8 +148,11 @@ void AngelEngineAudioProcessorEditor::updatePageVisibility()
     mainButton.setToggleState (! modPageVisible, juce::dontSendNotification);
     modButton.setToggleState (modPageVisible, juce::dontSendNotification);
 
-    for (auto& control : mainKnobs) control.setVisible (! modPageVisible);
-    for (auto& label : mainLabels) label.setVisible (! modPageVisible);
+    for (auto& control : mainKnobs)
+        control.setVisible (! modPageVisible);
+
+    for (auto& label : mainLabels)
+        label.setVisible (! modPageVisible);
 
     for (int i = 0; i < 3; ++i)
     {
@@ -162,11 +173,9 @@ void AngelEngineAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (panelBase);
 
-    // Top fascia.
     g.setColour (panelDark);
     g.fillRect (0, 0, getWidth(), 78);
 
-    // Slightly uneven seams to evoke an old painted metal panel.
     g.setColour (juce::Colours::black.withAlpha (0.16f));
     g.drawLine (0.0f, 78.0f, static_cast<float> (getWidth()), 78.0f, 2.0f);
     g.drawLine (0.0f, static_cast<float> (getHeight() - 25),
@@ -174,12 +183,13 @@ void AngelEngineAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (ink);
     g.setFont (juce::Font (juce::FontOptions (25.0f).withStyle ("Bold")));
-    g.drawText ("ANGEL ENGINE", 34, 14, 280, 32, juce::Justification::centredLeft, false);
+    g.drawText ("ANGEL ENGINE", 34, 14, 280, 32,
+                juce::Justification::centredLeft, false);
 
     g.setColour (inkDim);
     g.setFont (juce::Font (juce::FontOptions (10.5f).withStyle ("Bold")));
-    g.drawText ("ANALOG INSTABILITY PROCESSOR  /  AE-01",
-                36, 45, 320, 18, juce::Justification::centredLeft, false);
+    g.drawText ("ANALOG INSTABILITY / GRANULAR MEMORY PROCESSOR  /  AE-01",
+                36, 45, 430, 18, juce::Justification::centredLeft, false);
 
     drawScrew (g, 16.0f, 16.0f);
     drawScrew (g, static_cast<float> (getWidth() - 16), 16.0f);
@@ -193,15 +203,15 @@ void AngelEngineAudioProcessorEditor::paint (juce::Graphics& g)
     if (! modPageVisible)
     {
         const int gap = 12;
-        const int usable = content.getWidth();
-        const int groupWidth = (usable - gap * 3) / 4;
+        const int groupWidth = (content.getWidth() - gap * 3) / 4;
 
         for (int group = 0; group < 4; ++group)
         {
-            auto x = content.getX() + group * (groupWidth + gap);
-            auto box = juce::Rectangle<int> (x, content.getY(), groupWidth, content.getHeight());
+            const auto x = content.getX() + group * (groupWidth + gap);
+            const auto box = juce::Rectangle<int> (
+                x, content.getY(), groupWidth, content.getHeight());
 
-            g.setColour (panelDark.withAlpha (group == 3 ? 0.72f : 0.38f));
+            g.setColour (panelDark.withAlpha (group == 1 ? 0.58f : 0.40f));
             g.fillRoundedRectangle (box.toFloat(), 3.0f);
             g.setColour (panelLine.withAlpha (0.82f));
             g.drawRoundedRectangle (box.toFloat(), 3.0f, 1.0f);
@@ -209,13 +219,33 @@ void AngelEngineAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (accent);
         g.setFont (juce::Font (juce::FontOptions (9.5f).withStyle ("Bold")));
-        g.drawText ("TONE / WEAR", content.getX(), content.getY() + 11, groupWidth, 18,
+
+        g.drawText ("TONE / WEAR",
+                    content.getX(), content.getY() + 11, groupWidth, 18,
                     juce::Justification::centred, false);
-        g.drawText ("MEMORY / SPACE", content.getX() + groupWidth + gap, content.getY() + 11, groupWidth, 18,
+
+        g.drawText ("TEXTURE / GRAIN",
+                    content.getX() + groupWidth + gap,
+                    content.getY() + 11, groupWidth, 18,
                     juce::Justification::centred, false);
-        g.drawText ("IMAGE / MOTION", content.getX() + 2 * (groupWidth + gap), content.getY() + 11, groupWidth, 18,
+
+        g.drawText ("MEMORY / IMAGE",
+                    content.getX() + 2 * (groupWidth + gap),
+                    content.getY() + 11, groupWidth, 18,
                     juce::Justification::centred, false);
-        g.drawText ("RETURN", content.getX() + 3 * (groupWidth + gap), content.getY() + 11, groupWidth, 18,
+
+        g.drawText ("MOTION / RETURN",
+                    content.getX() + 3 * (groupWidth + gap),
+                    content.getY() + 11, groupWidth, 18,
+                    juce::Justification::centred, false);
+
+        // Small silk-screen legend under the granular section.
+        g.setColour (inkDim.withAlpha (0.72f));
+        g.setFont (juce::Font (juce::FontOptions (8.2f)));
+        g.drawText ("DENSITY  /  PITCH SCATTER  /  REVERSE",
+                    content.getX() + groupWidth + gap,
+                    content.getBottom() - 27,
+                    groupWidth, 14,
                     juce::Justification::centred, false);
     }
     else
@@ -225,27 +255,31 @@ void AngelEngineAudioProcessorEditor::paint (juce::Graphics& g)
 
         for (int i = 0; i < 3; ++i)
         {
-            auto strip = juce::Rectangle<int> (content.getX() + i * (stripWidth + gap),
-                                               content.getY(), stripWidth, content.getHeight());
+            const auto strip = juce::Rectangle<int> (
+                content.getX() + i * (stripWidth + gap),
+                content.getY(), stripWidth, content.getHeight());
+
             g.setColour (panelDark.withAlpha (0.54f));
             g.fillRoundedRectangle (strip.toFloat(), 3.0f);
             g.setColour (panelLine);
             g.drawRoundedRectangle (strip.toFloat(), 3.0f, 1.0f);
 
             g.setColour (accent.withAlpha (0.72f));
-            g.fillRect (strip.getX() + 12, strip.getY() + 47, strip.getWidth() - 24, 2);
+            g.fillRect (strip.getX() + 12, strip.getY() + 47,
+                        strip.getWidth() - 24, 2);
         }
 
         g.setColour (inkDim);
         g.setFont (juce::Font (juce::FontOptions (9.5f)));
-        g.drawText ("FREE-RUN MODULATION  /  DEPTH = +/- MACRO RANGE",
-                    content.getX(), content.getBottom() - 20, content.getWidth(), 16,
+        g.drawText ("FREE-RUN MODULATION  /  DEPTH = +/- MACRO RANGE  /  GRAIN MOD READY",
+                    content.getX(), content.getBottom() - 20,
+                    content.getWidth(), 16,
                     juce::Justification::centred, false);
     }
 
     g.setColour (inkDim.withAlpha (0.70f));
     g.setFont (juce::Font (juce::FontOptions (9.0f)));
-    g.drawText ("v0.2", getWidth() - 66, getHeight() - 23, 42, 14,
+    g.drawText ("v0.3", getWidth() - 66, getHeight() - 23, 42, 14,
                 juce::Justification::centredRight, false);
 }
 
@@ -265,12 +299,20 @@ void AngelEngineAudioProcessorEditor::resized()
 
         std::array<juce::Rectangle<int>, 4> groups;
         for (int group = 0; group < 4; ++group)
+        {
             groups[static_cast<size_t> (group)] = juce::Rectangle<int> (
-                content.getX() + group * (groupWidth + gap), content.getY(), groupWidth, content.getHeight());
+                content.getX() + group * (groupWidth + gap),
+                content.getY(), groupWidth, content.getHeight());
+        }
 
-        const std::array<std::array<int, 2>, 3> groupMap {{ {{0, 1}}, {{4, 2}}, {{3, 5}} }};
+        const std::array<std::array<int, 2>, 4> groupMap {{
+            {{0, 1}}, // AGE / AIR
+            {{2, 3}}, // MELT / GRAIN
+            {{4, 5}}, // GHOST / WIDTH
+            {{6, 7}}  // CHAOS / MIX
+        }};
 
-        for (int group = 0; group < 3; ++group)
+        for (int group = 0; group < 4; ++group)
         {
             auto inner = groups[static_cast<size_t> (group)].reduced (10, 36);
             const int half = inner.getWidth() / 2;
@@ -278,20 +320,19 @@ void AngelEngineAudioProcessorEditor::resized()
             for (int slot = 0; slot < 2; ++slot)
             {
                 const int knobIndex = groupMap[static_cast<size_t> (group)][static_cast<size_t> (slot)];
-                auto cell = juce::Rectangle<int> (inner.getX() + slot * half, inner.getY(), half, inner.getHeight());
+                auto cell = juce::Rectangle<int> (
+                    inner.getX() + slot * half,
+                    inner.getY(), half, inner.getHeight());
+
                 auto labelArea = cell.removeFromBottom (30);
                 mainLabels[static_cast<size_t> (knobIndex)].setBounds (labelArea);
 
-                if (knobIndex == 4)
-                    mainKnobs[static_cast<size_t> (knobIndex)].setBounds (cell.expanded (5, 8));
+                if (knobIndex == 2 || knobIndex == 3)
+                    mainKnobs[static_cast<size_t> (knobIndex)].setBounds (cell.expanded (4, 7));
                 else
                     mainKnobs[static_cast<size_t> (knobIndex)].setBounds (cell.reduced (1, 8));
             }
         }
-
-        auto mixInner = groups[3].reduced (18, 44);
-        mainLabels[6].setBounds (mixInner.removeFromBottom (30));
-        mainKnobs[6].setBounds (mixInner.reduced (2, 22));
     }
     else
     {
@@ -300,8 +341,9 @@ void AngelEngineAudioProcessorEditor::resized()
 
         for (int i = 0; i < 3; ++i)
         {
-            auto strip = juce::Rectangle<int> (content.getX() + i * (stripWidth + gap),
-                                               content.getY(), stripWidth, content.getHeight()).reduced (14);
+            auto strip = juce::Rectangle<int> (
+                content.getX() + i * (stripWidth + gap),
+                content.getY(), stripWidth, content.getHeight()).reduced (14);
 
             lfoLabels[static_cast<size_t> (i)].setBounds (strip.removeFromTop (34));
             strip.removeFromTop (14);
