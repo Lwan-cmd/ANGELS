@@ -6,7 +6,8 @@
 #include <array>
 #include <memory>
 
-class IngeniumAudioProcessorEditor final : public juce::AudioProcessorEditor
+class IngeniumAudioProcessorEditor final : public juce::AudioProcessorEditor,
+                                           private juce::Timer
 {
 public:
     explicit IngeniumAudioProcessorEditor (IngeniumAudioProcessor&);
@@ -16,21 +17,24 @@ public:
     void resized() override;
 
 private:
+    static constexpr float twoPi = juce::MathConstants<float>::twoPi;
+
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ComboAttachment  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
+    void timerCallback() override;
     void showMainPage();
     void showModPage();
     void updatePageVisibility();
     void styleKnob (juce::Slider& slider, bool small = false);
     void styleLabel (juce::Label& label, const juce::String& text, float size = 10.0f);
     void styleCombo (juce::ComboBox& box);
-    void layoutModule (juce::Rectangle<int> bounds,
-                       int macroIndex,
-                       std::initializer_list<int> subIndices,
-                       juce::ComboBox* optionalBox = nullptr,
-                       juce::Label* optionalLabel = nullptr);
+    void layoutVerticalModule (juce::Rectangle<int> bounds,
+                               int macroIndex,
+                               std::initializer_list<int> subIndices,
+                               juce::ComboBox* optionalBox = nullptr,
+                               juce::Label* optionalLabel = nullptr);
 
     IngeniumAudioProcessor& audioProcessor;
     IngeniumLookAndFeel ingeniumLook;
@@ -38,6 +42,8 @@ private:
 
     juce::TextButton mainButton { "MAIN" };
     juce::TextButton modButton  { "MOD" };
+    juce::TextButton bypassButton { "BYPASS" };
+    std::unique_ptr<ButtonAttachment> bypassAttachment;
 
     std::array<juce::Slider, 9> mainKnobs;
     std::array<juce::Label, 9> mainLabels;
