@@ -1,0 +1,38 @@
+name: Build ANGEL ENGINE macOS
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure universal macOS build
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+
+      - name: Build VST3 and AU
+        run: cmake --build build --config Release --target AngelEngine_VST3 AngelEngine_AU
+
+      - name: Package plugins
+        run: |
+          mkdir -p package/VST3
+          mkdir -p package/AU
+          cp -R "build/AngelEngine_artefacts/Release/VST3/ANGEL ENGINE.vst3" package/VST3/
+          cp -R "build/AngelEngine_artefacts/Release/AU/ANGEL ENGINE.component" package/AU/
+
+      - name: Upload macOS plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANGEL-ENGINE-macOS-universal
+          path: package/
+          if-no-files-found: error
