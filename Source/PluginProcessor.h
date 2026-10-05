@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <array>
+#include <cstdint>
 #include <vector>
 
 class AngelEngineAudioProcessor final : public juce::AudioProcessor
@@ -55,10 +56,17 @@ private:
     double meltPhase = 0.0;
     double chaosPhase = 0.0;
 
+    std::array<double, 3> lfoPhase { 0.0, 0.0, 0.0 };
+    std::array<float, 3> randomHeld { 0.15f, -0.37f, 0.62f };
+    std::array<std::uint32_t, 3> randomState { 0x12345678u, 0x87654321u, 0x31415926u };
+
     float readInterpolated (const std::vector<std::array<float, 2>>& buffer,
                             int writePosition,
                             float delaySamples,
                             int channel) const;
+
+    float getLfoValue (int lfoIndex, int shape) const;
+    void advanceLfo (int lfoIndex, float rateHz);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AngelEngineAudioProcessor)
 };
