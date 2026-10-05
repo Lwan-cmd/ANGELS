@@ -1,0 +1,1 @@
+Temporary staging marker for v0.3 granular engine. Safe to delete after code update.
