@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(AngelEngine VERSION 0.1.0)
+project(Ingenium VERSION 0.4.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,9 +16,9 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_plugin(AngelEngine
+juce_add_plugin(Ingenium
     COMPANY_NAME "LWAN"
-    BUNDLE_ID "com.lwan.angelengine"
+    BUNDLE_ID "com.lwan.ingenium"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
@@ -26,29 +26,30 @@ juce_add_plugin(AngelEngine
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE Lwan
-    PLUGIN_CODE AnG1
+    PLUGIN_CODE Ing1
     FORMATS VST3 AU
-    PRODUCT_NAME "ANGEL ENGINE"
+    PRODUCT_NAME "INGENIUM"
 )
 
-juce_generate_juce_header(AngelEngine)
+juce_generate_juce_header(Ingenium)
 
-target_sources(AngelEngine
+target_sources(Ingenium
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginProcessor.h
         Source/PluginEditor.cpp
         Source/PluginEditor.h
+        Source/AnalogLookAndFeel.h
 )
 
-target_compile_definitions(AngelEngine
+target_compile_definitions(Ingenium
     PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
 )
 
-target_link_libraries(AngelEngine
+target_link_libraries(Ingenium
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp

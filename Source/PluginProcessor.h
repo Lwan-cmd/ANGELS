@@ -5,11 +5,11 @@
 #include <cstdint>
 #include <vector>
 
-class AngelEngineAudioProcessor final : public juce::AudioProcessor
+class IngeniumAudioProcessor final : public juce::AudioProcessor
 {
 public:
-    AngelEngineAudioProcessor();
-    ~AngelEngineAudioProcessor() override = default;
+    IngeniumAudioProcessor();
+    ~IngeniumAudioProcessor() override = default;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -25,7 +25,7 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 2.0; }
+    double getTailLengthSeconds() const override { return 3.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -57,14 +57,18 @@ private:
     std::vector<std::array<float, 2>> meltDelay;
     std::vector<std::array<float, 2>> ghostDelay;
     std::vector<std::array<float, 2>> grainBuffer;
+    std::vector<std::array<float, 2>> smearBuffer;
+
     int meltWrite = 0;
     int ghostWrite = 0;
     int grainWrite = 0;
+    int smearWrite = 0;
 
     std::array<float, 2> heldSample { 0.0f, 0.0f };
     std::array<int, 2> holdCounter { 0, 0 };
     std::array<float, 2> ageLowpassState { 0.0f, 0.0f };
     std::array<float, 2> airLowpassState { 0.0f, 0.0f };
+    std::array<float, 2> smearDampState { 0.0f, 0.0f };
 
     double meltPhase = 0.0;
     double chaosPhase = 0.0;
@@ -73,7 +77,7 @@ private:
     std::array<float, 3> randomHeld { 0.15f, -0.37f, 0.62f };
     std::array<std::uint32_t, 3> randomState { 0x12345678u, 0x87654321u, 0x31415926u };
 
-    std::array<GrainVoice, 6> grains;
+    std::array<GrainVoice, 8> grains;
     int samplesUntilNextGrain = 0;
     std::uint32_t grainRandomState = 0x9e3779b9u;
 
@@ -82,12 +86,12 @@ private:
                             float delaySamples,
                             int channel) const;
 
-    float readCircularAt (double position, int channel) const;
+    float readGrainAt (double position, int channel) const;
     float nextGrainRandom();
-    void spawnGrain (float amount);
+    void spawnGrain (float amount, float chaos);
 
     float getLfoValue (int lfoIndex, int shape) const;
     void advanceLfo (int lfoIndex, float rateHz);
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AngelEngineAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (IngeniumAudioProcessor)
 };

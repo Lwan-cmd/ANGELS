@@ -14,7 +14,7 @@ namespace
     }
 }
 
-AngelEngineAudioProcessor::AngelEngineAudioProcessor()
+IngeniumAudioProcessor::IngeniumAudioProcessor()
     : AudioProcessor (BusesProperties()
                         .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
                         .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -22,7 +22,7 @@ AngelEngineAudioProcessor::AngelEngineAudioProcessor()
 {
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout AngelEngineAudioProcessor::createParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout IngeniumAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
@@ -35,18 +35,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout AngelEngineAudioProcessor::c
             defaultValue));
     };
 
-    addMacro ("age",   "AGE",   0.18f);
-    addMacro ("air",   "AIR",   0.22f);
-    addMacro ("ghost", "GHOST", 0.12f);
-    addMacro ("width", "WIDTH", 0.25f);
-    addMacro ("melt",  "MELT",  0.30f);
-    addMacro ("chaos", "CHAOS", 0.08f);
+    addMacro ("age",   "AGE",   0.16f);
+    addMacro ("melt",  "MELT",  0.24f);
     addMacro ("grain", "GRAIN", 0.00f);
+    addMacro ("ghost", "GHOST", 0.10f);
+    addMacro ("smear", "SMEAR", 0.00f);
+    addMacro ("chaos", "CHAOS", 0.06f);
+
+    addMacro ("air",   "AIR",   0.20f);
+    addMacro ("width", "WIDTH", 0.22f);
     addMacro ("mix",   "MIX",   1.00f);
 
-    const juce::StringArray shapes { "SINE", "TRIANGLE", "SAW", "SQUARE", "RANDOM" };
+    const juce::StringArray shapes {
+        "SINE", "TRIANGLE", "SAW", "SQUARE", "RANDOM"
+    };
+
     const juce::StringArray destinations {
-        "NONE", "AGE", "AIR", "GHOST", "WIDTH", "MELT", "CHAOS", "GRAIN"
+        "NONE", "AGE", "MELT", "GRAIN", "GHOST", "SMEAR", "CHAOS"
     };
 
     for (int i = 1; i <= 3; ++i)
@@ -57,7 +62,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout AngelEngineAudioProcessor::c
             juce::ParameterID { "lfo" + n + "Rate", 1 },
             "LFO " + n + " RATE",
             juce::NormalisableRange<float> { 0.03f, 8.0f, 0.001f, 0.38f },
-            0.25f * static_cast<float> (i)));
+            0.22f * static_cast<float> (i)));
 
         layout.add (std::make_unique<juce::AudioParameterFloat> (
             juce::ParameterID { "lfo" + n + "Depth", 1 },
@@ -81,42 +86,52 @@ juce::AudioProcessorValueTreeState::ParameterLayout AngelEngineAudioProcessor::c
     return layout;
 }
 
-void AngelEngineAudioProcessor::prepareToPlay (double sampleRate, int)
+void IngeniumAudioProcessor::prepareToPlay (double sampleRate, int)
 {
     sr = sampleRate;
 
-    const auto meltSize = static_cast<int> (std::ceil (sr * 0.060)) + 4;
-    const auto ghostSize = static_cast<int> (std::ceil (sr * 2.0)) + 4;
-    const auto grainSize = static_cast<int> (std::ceil (sr * 2.5)) + 4;
+    meltDelay.assign (
+        static_cast<size_t> (std::ceil (sr * 0.070)) + 4,
+        { 0.0f, 0.0f });
 
-    meltDelay.assign (static_cast<size_t> (meltSize), { 0.0f, 0.0f });
-    ghostDelay.assign (static_cast<size_t> (ghostSize), { 0.0f, 0.0f });
-    grainBuffer.assign (static_cast<size_t> (grainSize), { 0.0f, 0.0f });
+    ghostDelay.assign (
+        static_cast<size_t> (std::ceil (sr * 2.5)) + 4,
+        { 0.0f, 0.0f });
+
+    grainBuffer.assign (
+        static_cast<size_t> (std::ceil (sr * 2.5)) + 4,
+        { 0.0f, 0.0f });
+
+    smearBuffer.assign (
+        static_cast<size_t> (std::ceil (sr * 0.180)) + 4,
+        { 0.0f, 0.0f });
 
     meltWrite = 0;
     ghostWrite = 0;
     grainWrite = 0;
+    smearWrite = 0;
+
     heldSample = { 0.0f, 0.0f };
     holdCounter = { 0, 0 };
     ageLowpassState = { 0.0f, 0.0f };
     airLowpassState = { 0.0f, 0.0f };
+    smearDampState = { 0.0f, 0.0f };
+
     meltPhase = 0.0;
     chaosPhase = 0.0;
     lfoPhase = { 0.0, 0.0, 0.0 };
+
     grains = {};
     samplesUntilNextGrain = 0;
 }
 
-bool AngelEngineAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool IngeniumAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    const auto& input = layouts.getMainInputChannelSet();
-    const auto& output = layouts.getMainOutputChannelSet();
-
-    return input == juce::AudioChannelSet::stereo()
-        && output == juce::AudioChannelSet::stereo();
+    return layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo()
+        && layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
 
-float AngelEngineAudioProcessor::readInterpolated (
+float IngeniumAudioProcessor::readInterpolated (
     const std::vector<std::array<float, 2>>& buffer,
     int writePosition,
     float delaySamples,
@@ -125,31 +140,34 @@ float AngelEngineAudioProcessor::readInterpolated (
     if (buffer.empty())
         return 0.0f;
 
-    const auto size = static_cast<int> (buffer.size());
+    const int size = static_cast<int> (buffer.size());
     float readPosition = static_cast<float> (writePosition) - delaySamples;
 
     while (readPosition < 0.0f)
         readPosition += static_cast<float> (size);
 
-    const int i0 = static_cast<int> (readPosition) % size;
+    while (readPosition >= static_cast<float> (size))
+        readPosition -= static_cast<float> (size);
+
+    const int i0 = static_cast<int> (std::floor (readPosition)) % size;
     const int i1 = (i0 + 1) % size;
     const float frac = readPosition - std::floor (readPosition);
 
     const float a = buffer[static_cast<size_t> (i0)][static_cast<size_t> (channel)];
     const float b = buffer[static_cast<size_t> (i1)][static_cast<size_t> (channel)];
-
-    return juce::jmap (frac, a, b);
+    return a + (b - a) * frac;
 }
 
-float AngelEngineAudioProcessor::readCircularAt (double position, int channel) const
+float IngeniumAudioProcessor::readGrainAt (double position, int channel) const
 {
     if (grainBuffer.empty())
         return 0.0f;
 
-    const auto size = static_cast<int> (grainBuffer.size());
+    const int size = static_cast<int> (grainBuffer.size());
 
     while (position < 0.0)
         position += static_cast<double> (size);
+
     while (position >= static_cast<double> (size))
         position -= static_cast<double> (size);
 
@@ -162,16 +180,16 @@ float AngelEngineAudioProcessor::readCircularAt (double position, int channel) c
     return a + (b - a) * frac;
 }
 
-float AngelEngineAudioProcessor::nextGrainRandom()
+float IngeniumAudioProcessor::nextGrainRandom()
 {
     grainRandomState = grainRandomState * 1664525u + 1013904223u;
     return static_cast<float> (grainRandomState & 0x00ffffffu)
          / static_cast<float> (0x00ffffffu);
 }
 
-void AngelEngineAudioProcessor::spawnGrain (float amount)
+void IngeniumAudioProcessor::spawnGrain (float amount, float chaos)
 {
-    if (grainBuffer.empty() || amount <= 0.0f)
+    if (grainBuffer.empty() || amount <= 0.001f)
         return;
 
     GrainVoice* voice = nullptr;
@@ -201,61 +219,68 @@ void AngelEngineAudioProcessor::spawnGrain (float amount)
     const float r4 = nextGrainRandom();
     const float r5 = nextGrainRandom();
 
-    const float maxLookbackMs = 120.0f + amount * 780.0f;
-    const float lookbackMs = 35.0f + r1 * maxLookbackMs;
+    const float maxLookbackMs = 100.0f + amount * 850.0f;
+    const float lookbackMs = 25.0f + r1 * maxLookbackMs;
     const float delaySamples = lookbackMs * static_cast<float> (sr) / 1000.0f;
 
-    const float minLengthMs = 24.0f + (1.0f - amount) * 52.0f;
-    const float maxLengthMs = 72.0f + (1.0f - amount) * 110.0f;
+    const float minLengthMs = 20.0f + (1.0f - amount) * 55.0f;
+    const float maxLengthMs = 65.0f + (1.0f - amount) * 130.0f;
     const float lengthMs = minLengthMs + r2 * (maxLengthMs - minLengthMs);
 
-    const float pitchSpread = 1.0f + amount * 11.0f;
+    const float pitchSpread = 1.0f + amount * 11.0f + chaos * 2.0f;
     float semitones = std::round ((r3 * 2.0f - 1.0f) * pitchSpread);
-    if (amount < 0.12f)
+
+    if (amount < 0.10f)
         semitones = 0.0f;
 
-    const bool reverse = r4 < (0.04f + amount * amount * 0.34f);
+    const bool reverse = r4 < (0.03f + amount * amount * 0.36f + chaos * 0.05f);
     const double ratio = std::pow (2.0, static_cast<double> (semitones) / 12.0);
 
     voice->active = true;
     voice->readPosition = static_cast<double> (grainWrite) - static_cast<double> (delaySamples);
     voice->increment = reverse ? -ratio : ratio;
     voice->ageSamples = 0;
-    voice->lengthSamples = juce::jmax (8, static_cast<int> (lengthMs * static_cast<float> (sr) / 1000.0f));
-    voice->pan = (r5 * 2.0f - 1.0f) * juce::jmin (0.75f, amount * 0.75f);
-    voice->gain = 0.72f + (1.0f - amount) * 0.16f;
+    voice->lengthSamples = juce::jmax (
+        16,
+        static_cast<int> (lengthMs * static_cast<float> (sr) / 1000.0f));
+    voice->pan = (r5 * 2.0f - 1.0f) * juce::jmin (0.85f, amount * 0.85f);
+    voice->gain = 0.65f + (1.0f - amount) * 0.20f;
 }
 
-float AngelEngineAudioProcessor::getLfoValue (int lfoIndex, int shape) const
+float IngeniumAudioProcessor::getLfoValue (int lfoIndex, int shape) const
 {
     const float norm = static_cast<float> (
-        lfoPhase[static_cast<size_t> (lfoIndex)] / juce::MathConstants<double>::twoPi);
+        lfoPhase[static_cast<size_t> (lfoIndex)]
+        / juce::MathConstants<double>::twoPi);
 
     switch (shape)
     {
-        case 1: // triangle
+        case 1:
             if (norm < 0.25f) return norm * 4.0f;
             if (norm < 0.75f) return 2.0f - norm * 4.0f;
             return norm * 4.0f - 4.0f;
 
-        case 2: // saw
+        case 2:
             return norm * 2.0f - 1.0f;
 
-        case 3: // square
+        case 3:
             return norm < 0.5f ? 1.0f : -1.0f;
 
-        case 4: // sample & hold
+        case 4:
             return randomHeld[static_cast<size_t> (lfoIndex)];
 
         default:
-            return std::sin (static_cast<float> (lfoPhase[static_cast<size_t> (lfoIndex)]));
+            return std::sin (
+                static_cast<float> (lfoPhase[static_cast<size_t> (lfoIndex)]));
     }
 }
 
-void AngelEngineAudioProcessor::advanceLfo (int lfoIndex, float rateHz)
+void IngeniumAudioProcessor::advanceLfo (int lfoIndex, float rateHz)
 {
     auto& phase = lfoPhase[static_cast<size_t> (lfoIndex)];
-    phase += juce::MathConstants<double>::twoPi * static_cast<double> (rateHz) / sr;
+
+    phase += juce::MathConstants<double>::twoPi
+           * static_cast<double> (rateHz) / sr;
 
     if (phase >= juce::MathConstants<double>::twoPi)
     {
@@ -263,34 +288,39 @@ void AngelEngineAudioProcessor::advanceLfo (int lfoIndex, float rateHz)
 
         auto& state = randomState[static_cast<size_t> (lfoIndex)];
         state = state * 1664525u + 1013904223u;
-        const float unit = static_cast<float> (state & 0x00ffffffu)
-                         / static_cast<float> (0x00ffffffu);
+
+        const float unit =
+            static_cast<float> (state & 0x00ffffffu)
+            / static_cast<float> (0x00ffffffu);
+
         randomHeld[static_cast<size_t> (lfoIndex)] = unit * 2.0f - 1.0f;
     }
 }
 
-void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
-                                               juce::MidiBuffer&)
+void IngeniumAudioProcessor::processBlock (
+    juce::AudioBuffer<float>& buffer,
+    juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
 
     if (buffer.getNumChannels() < 2
         || meltDelay.empty()
         || ghostDelay.empty()
-        || grainBuffer.empty())
+        || grainBuffer.empty()
+        || smearBuffer.empty())
         return;
 
-    // Macro order here matches the LFO destination list, not the visual order.
-    const std::array<float, 7> base {
+    const std::array<float, 6> base {
         apvts.getRawParameterValue ("age")->load(),
-        apvts.getRawParameterValue ("air")->load(),
-        apvts.getRawParameterValue ("ghost")->load(),
-        apvts.getRawParameterValue ("width")->load(),
         apvts.getRawParameterValue ("melt")->load(),
-        apvts.getRawParameterValue ("chaos")->load(),
-        apvts.getRawParameterValue ("grain")->load()
+        apvts.getRawParameterValue ("grain")->load(),
+        apvts.getRawParameterValue ("ghost")->load(),
+        apvts.getRawParameterValue ("smear")->load(),
+        apvts.getRawParameterValue ("chaos")->load()
     };
 
+    const float air = apvts.getRawParameterValue ("air")->load();
+    const float width = apvts.getRawParameterValue ("width")->load();
     const float mix = apvts.getRawParameterValue ("mix")->load();
 
     std::array<float, 3> lfoRates {};
@@ -301,14 +331,18 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     for (int lfo = 0; lfo < 3; ++lfo)
     {
         const auto n = juce::String (lfo + 1);
+
         lfoRates[static_cast<size_t> (lfo)] =
             apvts.getRawParameterValue ("lfo" + n + "Rate")->load();
+
         lfoDepths[static_cast<size_t> (lfo)] =
             apvts.getRawParameterValue ("lfo" + n + "Depth")->load();
-        lfoShapes[static_cast<size_t> (lfo)] = static_cast<int> (std::round (
-            apvts.getRawParameterValue ("lfo" + n + "Shape")->load()));
-        lfoDests[static_cast<size_t> (lfo)] = static_cast<int> (std::round (
-            apvts.getRawParameterValue ("lfo" + n + "Dest")->load()));
+
+        lfoShapes[static_cast<size_t> (lfo)] = static_cast<int> (
+            std::round (apvts.getRawParameterValue ("lfo" + n + "Shape")->load()));
+
+        lfoDests[static_cast<size_t> (lfo)] = static_cast<int> (
+            std::round (apvts.getRawParameterValue ("lfo" + n + "Dest")->load()));
     }
 
     auto* left = buffer.getWritePointer (0);
@@ -317,76 +351,77 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     for (int i = 0; i < numSamples; ++i)
     {
-        std::array<float, 7> modulated = base;
+        std::array<float, 6> modulated = base;
 
         for (int lfo = 0; lfo < 3; ++lfo)
         {
-            const float lfoValue = getLfoValue (lfo, lfoShapes[static_cast<size_t> (lfo)]);
+            const float value =
+                getLfoValue (lfo, lfoShapes[static_cast<size_t> (lfo)]);
+
             const int dest = lfoDests[static_cast<size_t> (lfo)];
 
-            if (dest >= 1 && dest <= 7)
+            if (dest >= 1 && dest <= 6)
             {
                 auto& target = modulated[static_cast<size_t> (dest - 1)];
+
                 target = juce::jlimit (
-                    0.0f, 1.0f,
-                    target + lfoValue * lfoDepths[static_cast<size_t> (lfo)] * 0.50f);
+                    0.0f,
+                    1.0f,
+                    target + value
+                        * lfoDepths[static_cast<size_t> (lfo)]
+                        * 0.50f);
             }
 
             advanceLfo (lfo, lfoRates[static_cast<size_t> (lfo)]);
         }
 
         const float age   = modulated[0];
-        const float air   = modulated[1];
-        const float ghost = modulated[2];
-        const float width = modulated[3];
-        const float melt  = modulated[4];
+        const float melt  = modulated[1];
+        const float grain = modulated[2];
+        const float ghost = modulated[3];
+        const float smear = modulated[4];
         const float chaos = modulated[5];
-        const float grain = modulated[6];
 
         const float dryL = left[i];
         const float dryR = right[i];
 
-        const int holdPeriod = 1 + static_cast<int> (std::round (age * age * 12.0f));
-        const float ageMix = age * 0.70f;
-        const float ageLPAlpha = onePoleCoefficient (juce::jmap (age, 18000.0f, 3500.0f), sr);
-        const float airLPAlpha = onePoleCoefficient (4200.0f, sr);
-        const float airAmount = air * 0.45f;
+        const float chaosWave =
+            std::sin (static_cast<float> (chaosPhase))
+            * std::sin (static_cast<float> (chaosPhase * 0.371 + 1.1));
 
-        const float ghostDelayMs = juce::jmap (ghost, 180.0f, 520.0f);
-        const float ghostDelaySamples = ghostDelayMs * static_cast<float> (sr) / 1000.0f;
-        const float ghostFeedbackBase = juce::jmap (ghost, 0.18f, 0.58f);
-        const float ghostWet = ghost * 0.50f;
+        chaosPhase += twoPi * (0.055 + chaos * 0.23) / sr;
 
-        const float sideGain = 1.0f + width * 1.25f;
-        const float widthCompensation = 1.0f / (1.0f + width * 0.22f);
-
-        const float chaosWave = std::sin (static_cast<float> (chaosPhase))
-                              * std::sin (static_cast<float> (chaosPhase * 0.371 + 1.1));
-
-        chaosPhase += twoPi * (0.071 + chaos * 0.16) / sr;
         if (chaosPhase >= twoPi)
             chaosPhase -= twoPi;
 
-        const float meltRate = 0.13f + chaos * 0.42f;
-        const float baseDelayMs = 2.2f + melt * 8.0f;
-        const float modDepthMs = melt * (1.2f + chaos * 5.0f);
-        const float meltLfo = std::sin (static_cast<float> (meltPhase));
-        const float modulatedDelayMs = juce::jlimit (
-            0.7f, 45.0f,
-            baseDelayMs + modDepthMs * (0.72f * meltLfo + 0.28f * chaosWave));
+        const int holdPeriod =
+            1 + static_cast<int> (std::round (age * age * 14.0f));
+
+        const float ageMix = age * 0.72f;
+        const float ageCutoff = juce::jmap (age, 19000.0f, 3000.0f);
+        const float ageAlpha = onePoleCoefficient (ageCutoff, sr);
+
+        const float meltRate = 0.10f + melt * 0.23f + chaos * 0.40f;
+        const float meltBaseMs = 2.0f + melt * 8.5f;
+        const float meltDepthMs = melt * (1.2f + chaos * 5.8f);
+        const float meltWave = std::sin (static_cast<float> (meltPhase));
+
+        const float meltDelayMs = juce::jlimit (
+            0.6f,
+            48.0f,
+            meltBaseMs
+                + meltDepthMs * (0.74f * meltWave + 0.26f * chaosWave));
 
         meltPhase += twoPi * meltRate / sr;
+
         if (meltPhase >= twoPi)
             meltPhase -= twoPi;
 
-        const std::array<float, 2> input { dryL, dryR };
-        std::array<float, 2> preGrain {};
+        std::array<float, 2> stage { dryL, dryR };
 
-        // AGE and MELT happen before the granular memory, so the grain buffer
-        // captures the worn / unstable version of the source rather than raw audio.
         for (int ch = 0; ch < 2; ++ch)
         {
-            float x = input[static_cast<size_t> (ch)];
+            float x = stage[static_cast<size_t> (ch)];
 
             if (holdCounter[static_cast<size_t> (ch)] <= 0)
             {
@@ -396,39 +431,55 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
             --holdCounter[static_cast<size_t> (ch)];
 
-            const float crushed = heldSample[static_cast<size_t> (ch)];
-            x = juce::jmap (ageMix, x, crushed);
+            x += (heldSample[static_cast<size_t> (ch)] - x) * ageMix;
 
             ageLowpassState[static_cast<size_t> (ch)] +=
-                ageLPAlpha * (x - ageLowpassState[static_cast<size_t> (ch)]);
+                ageAlpha
+                * (x - ageLowpassState[static_cast<size_t> (ch)]);
 
-            x = juce::jmap (age * 0.65f, x, ageLowpassState[static_cast<size_t> (ch)]);
+            x += (ageLowpassState[static_cast<size_t> (ch)] - x)
+               * (age * 0.68f);
 
-            meltDelay[static_cast<size_t> (meltWrite)][static_cast<size_t> (ch)] = x;
-            const float meltDelaySamples = modulatedDelayMs * static_cast<float> (sr) / 1000.0f;
-            const float melted = readInterpolated (meltDelay, meltWrite, meltDelaySamples, ch);
-
-            x = juce::jmap (melt * 0.68f, x, melted);
-
-            const float drive = 1.0f + melt * 2.8f + chaos * 0.45f;
-            x = std::tanh (x * drive) / std::tanh (drive);
-            preGrain[static_cast<size_t> (ch)] = x;
+            stage[static_cast<size_t> (ch)] = x;
         }
 
-        grainBuffer[static_cast<size_t> (grainWrite)] = preGrain;
-
-        if (grain > 0.01f)
+        for (int ch = 0; ch < 2; ++ch)
         {
+            const float x = stage[static_cast<size_t> (ch)];
+
+            meltDelay[static_cast<size_t> (meltWrite)]
+                     [static_cast<size_t> (ch)] = x;
+
+            const float delayed = readInterpolated (
+                meltDelay,
+                meltWrite,
+                meltDelayMs * static_cast<float> (sr) / 1000.0f,
+                ch);
+
+            float y = x + (delayed - x) * (melt * 0.68f);
+
+            const float drive = 1.0f + melt * 2.6f + chaos * 0.38f;
+            y = std::tanh (y * drive) / std::tanh (drive);
+
+            stage[static_cast<size_t> (ch)] = y;
+        }
+
+        grainBuffer[static_cast<size_t> (grainWrite)] = stage;
+
+        if (grain > 0.001f)
+        {
+            --samplesUntilNextGrain;
+
             if (samplesUntilNextGrain <= 0)
             {
-                spawnGrain (grain);
-                const float densityHz = 2.5f + grain * 31.5f;
+                spawnGrain (grain, chaos);
+
+                const float density =
+                    2.0f + grain * 32.0f + chaos * 3.0f;
+
                 samplesUntilNextGrain = juce::jmax (
-                    1, static_cast<int> (static_cast<float> (sr) / densityHz));
-            }
-            else
-            {
-                --samplesUntilNextGrain;
+                    1,
+                    static_cast<int> (sr / static_cast<double> (density)));
             }
         }
         else
@@ -436,7 +487,7 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             samplesUntilNextGrain = 0;
         }
 
-        std::array<float, 2> grainAccum { 0.0f, 0.0f };
+        std::array<float, 2> grainSum { 0.0f, 0.0f };
         int activeGrains = 0;
 
         for (auto& voice : grains)
@@ -444,106 +495,199 @@ void AngelEngineAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             if (! voice.active)
                 continue;
 
-            const int windowDenominator = juce::jmax (1, voice.lengthSamples - 1);
-            const float grainPhase = static_cast<float> (voice.ageSamples)
-                                   / static_cast<float> (windowDenominator);
-            const float window = 0.5f - 0.5f * std::cos (twoPi * grainPhase);
+            const float position =
+                static_cast<float> (voice.ageSamples)
+                / static_cast<float> (juce::jmax (1, voice.lengthSamples));
 
-            const float leftGain = 1.0f - juce::jmax (0.0f, voice.pan) * 0.68f;
-            const float rightGain = 1.0f + juce::jmin (0.0f, voice.pan) * 0.68f;
+            if (position >= 1.0f)
+            {
+                voice.active = false;
+                continue;
+            }
 
-            grainAccum[0] += readCircularAt (voice.readPosition, 0)
-                           * window * voice.gain * leftGain;
-            grainAccum[1] += readCircularAt (voice.readPosition, 1)
-                           * window * voice.gain * rightGain;
+            const float env =
+                0.5f - 0.5f * std::cos (twoPi * position);
+
+            const float panL = std::sqrt (
+                0.5f * juce::jlimit (0.0f, 2.0f, 1.0f - voice.pan));
+
+            const float panR = std::sqrt (
+                0.5f * juce::jlimit (0.0f, 2.0f, 1.0f + voice.pan));
+
+            grainSum[0] += readGrainAt (voice.readPosition, 0)
+                         * env * voice.gain * panL;
+
+            grainSum[1] += readGrainAt (voice.readPosition, 1)
+                         * env * voice.gain * panR;
 
             voice.readPosition += voice.increment;
-
-            const double grainSize = static_cast<double> (grainBuffer.size());
-            while (voice.readPosition < 0.0)
-                voice.readPosition += grainSize;
-            while (voice.readPosition >= grainSize)
-                voice.readPosition -= grainSize;
-
             ++voice.ageSamples;
             ++activeGrains;
-
-            if (voice.ageSamples >= voice.lengthSamples)
-                voice.active = false;
         }
 
-        std::array<float, 2> granular = preGrain;
         if (activeGrains > 0)
         {
-            const float normalise = 1.0f / std::sqrt (static_cast<float> (activeGrains));
-            granular[0] = grainAccum[0] * normalise;
-            granular[1] = grainAccum[1] * normalise;
+            const float norm =
+                1.0f / std::sqrt (static_cast<float> (activeGrains));
+
+            const float grainWet = grain * 0.72f;
+
+            stage[0] += (grainSum[0] * norm - stage[0]) * grainWet;
+            stage[1] += (grainSum[1] * norm - stage[1]) * grainWet;
         }
 
-        const float grainWet = grain * 0.82f;
-        std::array<float, 2> processed {
-            preGrain[0] + (granular[0] - preGrain[0]) * grainWet,
-            preGrain[1] + (granular[1] - preGrain[1]) * grainWet
-        };
-
-        // AIR and GHOST operate after the granular section, helping the grains
-        // live in the same spectral and spatial world as the direct signal.
         for (int ch = 0; ch < 2; ++ch)
         {
-            float x = processed[static_cast<size_t> (ch)];
+            const float x = stage[static_cast<size_t> (ch)];
 
-            airLowpassState[static_cast<size_t> (ch)] +=
-                airLPAlpha * (x - airLowpassState[static_cast<size_t> (ch)]);
+            const float d1 = (4.5f + smear * 7.0f)
+                           * static_cast<float> (sr) / 1000.0f;
 
-            const float high = x - airLowpassState[static_cast<size_t> (ch)];
-            x += high * airAmount;
+            const float d2 = (11.0f + smear * 17.0f)
+                           * static_cast<float> (sr) / 1000.0f;
 
-            const float ghostRead = readInterpolated (ghostDelay, ghostWrite, ghostDelaySamples, ch);
-            const float feedback = juce::jlimit (
-                0.0f, 0.74f,
-                ghostFeedbackBase + chaos * 0.08f * chaosWave);
+            const float d3 = (24.0f + smear * 31.0f)
+                           * static_cast<float> (sr) / 1000.0f;
 
-            ghostDelay[static_cast<size_t> (ghostWrite)][static_cast<size_t> (ch)] =
-                x + ghostRead * feedback;
+            const float tap1 = readInterpolated (
+                smearBuffer, smearWrite, d1, ch);
 
-            x += ghostRead * ghostWet;
-            processed[static_cast<size_t> (ch)] = x;
+            const float tap2 = readInterpolated (
+                smearBuffer, smearWrite, d2, ch);
+
+            const float tap3 = readInterpolated (
+                smearBuffer, smearWrite, d3, ch);
+
+            const float diffused =
+                (tap1 - 0.42f * tap2 + 0.72f * tap3) / 1.72f;
+
+            const float dampAlpha =
+                onePoleCoefficient (
+                    juce::jmap (smear, 12000.0f, 4200.0f),
+                    sr);
+
+            smearDampState[static_cast<size_t> (ch)] +=
+                dampAlpha
+                * (diffused - smearDampState[static_cast<size_t> (ch)]);
+
+            const float feedback =
+                0.12f + smear * 0.56f + chaos * 0.04f * chaosWave;
+
+            smearBuffer[static_cast<size_t> (smearWrite)]
+                       [static_cast<size_t> (ch)] =
+                x + smearDampState[static_cast<size_t> (ch)]
+                    * juce::jlimit (0.0f, 0.72f, feedback);
+
+            const float blurred =
+                0.55f * diffused
+                + 0.45f * smearDampState[static_cast<size_t> (ch)];
+
+            stage[static_cast<size_t> (ch)] +=
+                (blurred - stage[static_cast<size_t> (ch)])
+                * (smear * 0.78f);
         }
 
-        const float mid = 0.5f * (processed[0] + processed[1]);
-        const float side = 0.5f * (processed[0] - processed[1]) * sideGain;
+        const float ghostDelayMs =
+            juce::jmap (ghost, 150.0f, 610.0f);
 
-        const float wetL = std::tanh ((mid + side) * widthCompensation);
-        const float wetR = std::tanh ((mid - side) * widthCompensation);
+        const float ghostDelaySamples =
+            ghostDelayMs * static_cast<float> (sr) / 1000.0f;
 
-        left[i]  = dryL + (wetL - dryL) * mix;
+        const float ghostFeedback =
+            juce::jlimit (
+                0.0f,
+                0.76f,
+                0.16f + ghost * 0.50f
+                    + chaos * 0.07f * chaosWave);
+
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const float x = stage[static_cast<size_t> (ch)];
+
+            const float memory = readInterpolated (
+                ghostDelay,
+                ghostWrite,
+                ghostDelaySamples,
+                ch);
+
+            ghostDelay[static_cast<size_t> (ghostWrite)]
+                      [static_cast<size_t> (ch)] =
+                x + memory * ghostFeedback;
+
+            stage[static_cast<size_t> (ch)] +=
+                memory * ghost * 0.52f;
+        }
+
+        const float airAlpha =
+            onePoleCoefficient (4300.0f, sr);
+
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const float x = stage[static_cast<size_t> (ch)];
+
+            airLowpassState[static_cast<size_t> (ch)] +=
+                airAlpha
+                * (x - airLowpassState[static_cast<size_t> (ch)]);
+
+            const float high =
+                x - airLowpassState[static_cast<size_t> (ch)];
+
+            stage[static_cast<size_t> (ch)] =
+                x + high * air * 0.46f;
+        }
+
+        const float mid = 0.5f * (stage[0] + stage[1]);
+        const float side = 0.5f * (stage[0] - stage[1])
+                         * (1.0f + width * 1.35f);
+
+        const float widthComp = 1.0f / (1.0f + width * 0.22f);
+
+        const float wetL =
+            std::tanh ((mid + side) * widthComp);
+
+        const float wetR =
+            std::tanh ((mid - side) * widthComp);
+
+        left[i] = dryL + (wetL - dryL) * mix;
         right[i] = dryR + (wetR - dryR) * mix;
 
-        meltWrite = (meltWrite + 1) % static_cast<int> (meltDelay.size());
-        ghostWrite = (ghostWrite + 1) % static_cast<int> (ghostDelay.size());
-        grainWrite = (grainWrite + 1) % static_cast<int> (grainBuffer.size());
+        meltWrite =
+            (meltWrite + 1) % static_cast<int> (meltDelay.size());
+
+        ghostWrite =
+            (ghostWrite + 1) % static_cast<int> (ghostDelay.size());
+
+        grainWrite =
+            (grainWrite + 1) % static_cast<int> (grainBuffer.size());
+
+        smearWrite =
+            (smearWrite + 1) % static_cast<int> (smearBuffer.size());
     }
 }
 
-void AngelEngineAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void IngeniumAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     if (auto xml = apvts.copyState().createXml())
         copyXmlToBinary (*xml, destData);
 }
 
-void AngelEngineAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void IngeniumAudioProcessor::setStateInformation (
+    const void* data,
+    int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    {
         if (xml->hasTagName (apvts.state.getType()))
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+    }
 }
 
-juce::AudioProcessorEditor* AngelEngineAudioProcessor::createEditor()
+juce::AudioProcessorEditor* IngeniumAudioProcessor::createEditor()
 {
-    return new AngelEngineAudioProcessorEditor (*this);
+    return new IngeniumAudioProcessorEditor (*this);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new AngelEngineAudioProcessor();
+    return new IngeniumAudioProcessor();
 }

@@ -2,53 +2,118 @@
 
 namespace
 {
-    const juce::Colour panelBase  { 0xff6f6d5f };
-    const juce::Colour panelDark  { 0xff35362f };
-    const juce::Colour panelLine  { 0xff272822 };
-    const juce::Colour ink        { 0xffe8dfc8 };
-    const juce::Colour inkDim     { 0xffc7bea7 };
-    const juce::Colour accent     { 0xffc6ae6d };
+    const juce::Colour shell      { 0xfff3efe6 };
+    const juce::Colour shellEdge  { 0xffbdb5a8 };
+    const juce::Colour ink        { 0xff202020 };
+    const juce::Colour inkDim     { 0xff62605b };
+
+    const std::array<juce::Colour, 6> effectColours {
+        juce::Colour (0xffdce9d3),
+        juce::Colour (0xffffc8b7),
+        juce::Colour (0xffffe0a2),
+        juce::Colour (0xffcfe4f3),
+        juce::Colour (0xffddccec),
+        juce::Colour (0xffcfe8df)
+    };
+
+    const std::array<juce::Colour, 3> lfoColours {
+        juce::Colour (0xffcfe4f3),
+        juce::Colour (0xffddccec),
+        juce::Colour (0xffcfe8df)
+    };
 
     void drawScrew (juce::Graphics& g, float x, float y)
     {
-        g.setColour (juce::Colours::black.withAlpha (0.28f));
-        g.fillEllipse (x - 4.0f, y - 3.0f, 9.0f, 9.0f);
-        g.setColour (juce::Colour (0xffaaa58f));
+        g.setColour (juce::Colours::black.withAlpha (0.14f));
+        g.fillEllipse (x - 5.0f, y - 4.0f, 10.0f, 10.0f);
+
+        g.setColour (juce::Colour (0xff383838));
         g.fillEllipse (x - 4.0f, y - 4.0f, 8.0f, 8.0f);
-        g.setColour (juce::Colour (0xff45463f));
-        g.drawLine (x - 2.2f, y, x + 2.2f, y, 1.1f);
+
+        g.setColour (juce::Colour (0xff9e9a92));
+        g.drawLine (x - 2.0f, y, x + 2.0f, y, 1.0f);
+    }
+
+    void drawModule (juce::Graphics& g,
+                     juce::Rectangle<int> bounds,
+                     juce::Colour colour,
+                     const juce::String& title,
+                     const juce::String& category)
+    {
+        auto r = bounds.toFloat();
+
+        g.setColour (colour);
+        g.fillRoundedRectangle (r, 13.0f);
+
+        g.setColour (colour.darker (0.16f).withAlpha (0.55f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 13.0f, 1.0f);
+
+        g.setColour (colour.darker (0.36f));
+        g.fillEllipse (r.getX() + 15.0f, r.getY() + 17.0f, 9.0f, 9.0f);
+
+        g.setColour (ink);
+        g.setFont (juce::Font (
+            juce::FontOptions (17.0f).withStyle ("Bold")));
+
+        g.drawText (
+            title,
+            bounds.getX() + 32,
+            bounds.getY() + 10,
+            bounds.getWidth() - 84,
+            25,
+            juce::Justification::centredLeft,
+            false);
+
+        g.setColour (inkDim);
+        g.setFont (juce::Font (
+            juce::FontOptions (9.3f).withStyle ("Bold")));
+
+        g.drawText (
+            category,
+            bounds.getRight() - 92,
+            bounds.getY() + 12,
+            74,
+            20,
+            juce::Justification::centredRight,
+            false);
     }
 }
 
-AngelEngineAudioProcessorEditor::AngelEngineAudioProcessorEditor (
-    AngelEngineAudioProcessor& p)
+IngeniumAudioProcessorEditor::IngeniumAudioProcessorEditor (
+    IngeniumAudioProcessor& p)
     : AudioProcessorEditor (&p),
       audioProcessor (p)
 {
-    setLookAndFeel (&analogLook);
-    setSize (980, 520);
+    setLookAndFeel (&ingeniumLook);
+
+    setSize (1020, 700);
     setResizable (true, true);
-    setResizeLimits (820, 440, 1280, 700);
+    setResizeLimits (880, 610, 1340, 900);
 
     mainButton.setClickingTogglesState (false);
     modButton.setClickingTogglesState (false);
+
     mainButton.onClick = [this] { showMainPage(); };
     modButton.onClick = [this] { showModPage(); };
+
     addAndMakeVisible (mainButton);
     addAndMakeVisible (modButton);
 
     for (size_t i = 0; i < mainKnobs.size(); ++i)
     {
         styleKnob (mainKnobs[i]);
-
-        const bool textureMacro = (i == 2 || i == 3);
-        styleLabel (mainLabels[i], mainParameterNames[i], textureMacro ? 13.5f : 12.0f);
+        styleLabel (
+            mainLabels[i],
+            mainParameterNames[i],
+            i < 6 ? 12.0f : 11.0f);
 
         addAndMakeVisible (mainKnobs[i]);
         addAndMakeVisible (mainLabels[i]);
 
         mainAttachments[i] = std::make_unique<SliderAttachment> (
-            audioProcessor.apvts, mainParameterIDs[i], mainKnobs[i]);
+            audioProcessor.apvts,
+            mainParameterIDs[i],
+            mainKnobs[i]);
     }
 
     const juce::StringArray shapes {
@@ -56,7 +121,7 @@ AngelEngineAudioProcessorEditor::AngelEngineAudioProcessorEditor (
     };
 
     const juce::StringArray targets {
-        "NONE", "AGE", "AIR", "GHOST", "WIDTH", "MELT", "CHAOS", "GRAIN"
+        "NONE", "AGE", "MELT", "GRAIN", "GHOST", "SMEAR", "CHAOS"
     };
 
     for (int i = 0; i < 3; ++i)
@@ -66,11 +131,30 @@ AngelEngineAudioProcessorEditor::AngelEngineAudioProcessorEditor (
         styleKnob (rateKnobs[static_cast<size_t> (i)]);
         styleKnob (depthKnobs[static_cast<size_t> (i)]);
 
-        styleLabel (lfoLabels[static_cast<size_t> (i)], "LFO 0" + n, 15.0f);
-        styleLabel (rateLabels[static_cast<size_t> (i)], "RATE", 10.5f);
-        styleLabel (depthLabels[static_cast<size_t> (i)], "DEPTH", 10.5f);
-        styleLabel (shapeLabels[static_cast<size_t> (i)], "SHAPE", 9.5f);
-        styleLabel (targetLabels[static_cast<size_t> (i)], "TARGET", 9.5f);
+        styleLabel (
+            lfoLabels[static_cast<size_t> (i)],
+            "LFO 0" + n,
+            16.0f);
+
+        styleLabel (
+            rateLabels[static_cast<size_t> (i)],
+            "RATE",
+            10.5f);
+
+        styleLabel (
+            depthLabels[static_cast<size_t> (i)],
+            "DEPTH",
+            10.5f);
+
+        styleLabel (
+            shapeLabels[static_cast<size_t> (i)],
+            "SHAPE",
+            9.5f);
+
+        styleLabel (
+            targetLabels[static_cast<size_t> (i)],
+            "TARGET",
+            9.5f);
 
         auto& shape = shapeBoxes[static_cast<size_t> (i)];
         auto& target = targetBoxes[static_cast<size_t> (i)];
@@ -91,65 +175,98 @@ AngelEngineAudioProcessorEditor::AngelEngineAudioProcessorEditor (
         addAndMakeVisible (shape);
         addAndMakeVisible (target);
 
-        rateAttachments[static_cast<size_t> (i)] = std::make_unique<SliderAttachment> (
-            audioProcessor.apvts, "lfo" + n + "Rate", rateKnobs[static_cast<size_t> (i)]);
+        rateAttachments[static_cast<size_t> (i)] =
+            std::make_unique<SliderAttachment> (
+                audioProcessor.apvts,
+                "lfo" + n + "Rate",
+                rateKnobs[static_cast<size_t> (i)]);
 
-        depthAttachments[static_cast<size_t> (i)] = std::make_unique<SliderAttachment> (
-            audioProcessor.apvts, "lfo" + n + "Depth", depthKnobs[static_cast<size_t> (i)]);
+        depthAttachments[static_cast<size_t> (i)] =
+            std::make_unique<SliderAttachment> (
+                audioProcessor.apvts,
+                "lfo" + n + "Depth",
+                depthKnobs[static_cast<size_t> (i)]);
 
-        shapeAttachments[static_cast<size_t> (i)] = std::make_unique<ComboAttachment> (
-            audioProcessor.apvts, "lfo" + n + "Shape", shape);
+        shapeAttachments[static_cast<size_t> (i)] =
+            std::make_unique<ComboAttachment> (
+                audioProcessor.apvts,
+                "lfo" + n + "Shape",
+                shape);
 
-        targetAttachments[static_cast<size_t> (i)] = std::make_unique<ComboAttachment> (
-            audioProcessor.apvts, "lfo" + n + "Dest", target);
+        targetAttachments[static_cast<size_t> (i)] =
+            std::make_unique<ComboAttachment> (
+                audioProcessor.apvts,
+                "lfo" + n + "Dest",
+                target);
     }
 
     updatePageVisibility();
 }
 
-AngelEngineAudioProcessorEditor::~AngelEngineAudioProcessorEditor()
+IngeniumAudioProcessorEditor::~IngeniumAudioProcessorEditor()
 {
     setLookAndFeel (nullptr);
 }
 
-void AngelEngineAudioProcessorEditor::styleKnob (juce::Slider& slider)
+void IngeniumAudioProcessorEditor::styleKnob (juce::Slider& slider)
 {
-    slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    slider.setSliderStyle (
+        juce::Slider::RotaryHorizontalVerticalDrag);
+
+    slider.setTextBoxStyle (
+        juce::Slider::NoTextBox,
+        false,
+        0,
+        0);
+
     slider.setMouseDragSensitivity (180);
 }
 
-void AngelEngineAudioProcessorEditor::styleLabel (juce::Label& label,
-                                                   const juce::String& text,
-                                                   float size)
+void IngeniumAudioProcessorEditor::styleLabel (
+    juce::Label& label,
+    const juce::String& text,
+    float size)
 {
     label.setText (text, juce::dontSendNotification);
     label.setJustificationType (juce::Justification::centred);
-    label.setFont (juce::Font (juce::FontOptions (size).withStyle ("Bold")));
-    label.setColour (juce::Label::textColourId, ink);
+
+    label.setFont (
+        juce::Font (
+            juce::FontOptions (size).withStyle ("Bold")));
+
+    label.setColour (
+        juce::Label::textColourId,
+        ink);
 }
 
-void AngelEngineAudioProcessorEditor::showMainPage()
+void IngeniumAudioProcessorEditor::showMainPage()
 {
     modPageVisible = false;
     updatePageVisibility();
+    resized();
     repaint();
 }
 
-void AngelEngineAudioProcessorEditor::showModPage()
+void IngeniumAudioProcessorEditor::showModPage()
 {
     modPageVisible = true;
     updatePageVisibility();
+    resized();
     repaint();
 }
 
-void AngelEngineAudioProcessorEditor::updatePageVisibility()
+void IngeniumAudioProcessorEditor::updatePageVisibility()
 {
-    mainButton.setToggleState (! modPageVisible, juce::dontSendNotification);
-    modButton.setToggleState (modPageVisible, juce::dontSendNotification);
+    mainButton.setToggleState (
+        ! modPageVisible,
+        juce::dontSendNotification);
 
-    for (auto& control : mainKnobs)
-        control.setVisible (! modPageVisible);
+    modButton.setToggleState (
+        modPageVisible,
+        juce::dontSendNotification);
+
+    for (auto& knob : mainKnobs)
+        knob.setVisible (! modPageVisible);
 
     for (auto& label : mainLabels)
         label.setVisible (! modPageVisible);
@@ -157,6 +274,7 @@ void AngelEngineAudioProcessorEditor::updatePageVisibility()
     for (int i = 0; i < 3; ++i)
     {
         const bool visible = modPageVisible;
+
         rateKnobs[static_cast<size_t> (i)].setVisible (visible);
         depthKnobs[static_cast<size_t> (i)].setVisible (visible);
         lfoLabels[static_cast<size_t> (i)].setVisible (visible);
@@ -169,207 +287,408 @@ void AngelEngineAudioProcessorEditor::updatePageVisibility()
     }
 }
 
-void AngelEngineAudioProcessorEditor::paint (juce::Graphics& g)
+void IngeniumAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (panelBase);
+    g.fillAll (shell);
 
-    g.setColour (panelDark);
-    g.fillRect (0, 0, getWidth(), 78);
+    auto whole = getLocalBounds().toFloat();
 
-    g.setColour (juce::Colours::black.withAlpha (0.16f));
-    g.drawLine (0.0f, 78.0f, static_cast<float> (getWidth()), 78.0f, 2.0f);
-    g.drawLine (0.0f, static_cast<float> (getHeight() - 25),
-                static_cast<float> (getWidth()), static_cast<float> (getHeight() - 25), 1.0f);
+    g.setColour (shellEdge);
+    g.drawRoundedRectangle (
+        whole.reduced (1.0f),
+        15.0f,
+        1.2f);
+
+    drawScrew (g, 18.0f, 18.0f);
+    drawScrew (g, static_cast<float> (getWidth() - 18), 18.0f);
+    drawScrew (g, 18.0f, static_cast<float> (getHeight() - 18));
+    drawScrew (
+        g,
+        static_cast<float> (getWidth() - 18),
+        static_cast<float> (getHeight() - 18));
 
     g.setColour (ink);
-    g.setFont (juce::Font (juce::FontOptions (25.0f).withStyle ("Bold")));
-    g.drawText ("ANGEL ENGINE", 34, 14, 280, 32,
-                juce::Justification::centredLeft, false);
+    g.setFont (
+        juce::Font (
+            juce::FontOptions (32.0f).withStyle ("Bold")));
+
+    g.drawText (
+        "INGENIUM",
+        46,
+        21,
+        310,
+        38,
+        juce::Justification::centredLeft,
+        false);
 
     g.setColour (inkDim);
-    g.setFont (juce::Font (juce::FontOptions (10.5f).withStyle ("Bold")));
-    g.drawText ("ANALOG INSTABILITY / GRANULAR MEMORY PROCESSOR  /  AE-01",
-                36, 45, 430, 18, juce::Justification::centredLeft, false);
+    g.setFont (
+        juce::Font (
+            juce::FontOptions (10.0f).withStyle ("Bold")));
 
-    drawScrew (g, 16.0f, 16.0f);
-    drawScrew (g, static_cast<float> (getWidth() - 16), 16.0f);
-    drawScrew (g, 16.0f, static_cast<float> (getHeight() - 14));
-    drawScrew (g, static_cast<float> (getWidth() - 16), static_cast<float> (getHeight() - 14));
+    g.drawText (
+        "ANALOG INSTABILITY PROCESSOR",
+        48,
+        57,
+        310,
+        18,
+        juce::Justification::centredLeft,
+        false);
 
-    auto content = getLocalBounds().reduced (28);
+    g.drawText (
+        "IG-01  /  v0.4",
+        getWidth() - 330,
+        24,
+        105,
+        18,
+        juce::Justification::centredRight,
+        false);
+
+    auto content = getLocalBounds().reduced (34);
     content.removeFromTop (72);
-    content.removeFromBottom (20);
 
     if (! modPageVisible)
     {
+        auto output = content.removeFromBottom (142);
+        content.removeFromBottom (12);
+
         const int gap = 12;
-        const int groupWidth = (content.getWidth() - gap * 3) / 4;
+        const int columnWidth =
+            (content.getWidth() - gap * 2) / 3;
 
-        for (int group = 0; group < 4; ++group)
+        const int rowHeight =
+            (content.getHeight() - gap) / 2;
+
+        const std::array<juce::String, 6> titles {
+            "AGE", "MELT", "GRAIN",
+            "GHOST", "SMEAR", "CHAOS"
+        };
+
+        const std::array<juce::String, 6> categories {
+            "TONE", "TEXTURE", "TEXTURE",
+            "SPACE", "MOTION", "MODULATION"
+        };
+
+        for (int i = 0; i < 6; ++i)
         {
-            const auto x = content.getX() + group * (groupWidth + gap);
-            const auto box = juce::Rectangle<int> (
-                x, content.getY(), groupWidth, content.getHeight());
+            const int col = i % 3;
+            const int row = i / 3;
 
-            g.setColour (panelDark.withAlpha (group == 1 ? 0.58f : 0.40f));
-            g.fillRoundedRectangle (box.toFloat(), 3.0f);
-            g.setColour (panelLine.withAlpha (0.82f));
-            g.drawRoundedRectangle (box.toFloat(), 3.0f, 1.0f);
+            const auto r = juce::Rectangle<int> (
+                content.getX() + col * (columnWidth + gap),
+                content.getY() + row * (rowHeight + gap),
+                columnWidth,
+                rowHeight);
+
+            drawModule (
+                g,
+                r,
+                effectColours[static_cast<size_t> (i)],
+                titles[static_cast<size_t> (i)],
+                categories[static_cast<size_t> (i)]);
         }
 
-        g.setColour (accent);
-        g.setFont (juce::Font (juce::FontOptions (9.5f).withStyle ("Bold")));
+        g.setColour (juce::Colour (0xffebe6dc));
+        g.fillRoundedRectangle (
+            output.toFloat(),
+            13.0f);
 
-        g.drawText ("TONE / WEAR",
-                    content.getX(), content.getY() + 11, groupWidth, 18,
-                    juce::Justification::centred, false);
+        g.setColour (shellEdge.withAlpha (0.72f));
+        g.drawRoundedRectangle (
+            output.toFloat().reduced (0.5f),
+            13.0f,
+            1.0f);
 
-        g.drawText ("TEXTURE / GRAIN",
-                    content.getX() + groupWidth + gap,
-                    content.getY() + 11, groupWidth, 18,
-                    juce::Justification::centred, false);
+        g.setColour (inkDim);
+        g.setFont (
+            juce::Font (
+                juce::FontOptions (10.0f).withStyle ("Bold")));
 
-        g.drawText ("MEMORY / IMAGE",
-                    content.getX() + 2 * (groupWidth + gap),
-                    content.getY() + 11, groupWidth, 18,
-                    juce::Justification::centred, false);
+        g.drawText (
+            "OUTPUT / FINISH",
+            output.getX() + 18,
+            output.getY() + 12,
+            150,
+            18,
+            juce::Justification::centredLeft,
+            false);
 
-        g.drawText ("MOTION / RETURN",
-                    content.getX() + 3 * (groupWidth + gap),
-                    content.getY() + 11, groupWidth, 18,
-                    juce::Justification::centred, false);
+        const int mixX =
+            output.getX() + output.getWidth() * 2 / 3;
 
-        // Small silk-screen legend under the granular section.
+        g.setColour (shellEdge.withAlpha (0.85f));
+        g.drawLine (
+            static_cast<float> (mixX),
+            static_cast<float> (output.getY() + 18),
+            static_cast<float> (mixX),
+            static_cast<float> (output.getBottom() - 18),
+            1.0f);
+
         g.setColour (inkDim.withAlpha (0.72f));
-        g.setFont (juce::Font (juce::FontOptions (8.2f)));
-        g.drawText ("DENSITY  /  PITCH SCATTER  /  REVERSE",
-                    content.getX() + groupWidth + gap,
-                    content.getBottom() - 27,
-                    groupWidth, 14,
-                    juce::Justification::centred, false);
+        g.setFont (
+            juce::Font (
+                juce::FontOptions (8.5f)));
+
+        g.drawText (
+            "AIR  /  WIDTH",
+            output.getX() + 18,
+            output.getBottom() - 26,
+            output.getWidth() * 2 / 3 - 38,
+            14,
+            juce::Justification::centred,
+            false);
+
+        g.drawText (
+            "MIX  —  OUTPUT ONLY",
+            mixX + 8,
+            output.getBottom() - 26,
+            output.getRight() - mixX - 26,
+            14,
+            juce::Justification::centred,
+            false);
     }
     else
     {
         const int gap = 16;
-        const int stripWidth = (content.getWidth() - gap * 2) / 3;
+        const int stripWidth =
+            (content.getWidth() - gap * 2) / 3;
 
         for (int i = 0; i < 3; ++i)
         {
             const auto strip = juce::Rectangle<int> (
                 content.getX() + i * (stripWidth + gap),
-                content.getY(), stripWidth, content.getHeight());
+                content.getY(),
+                stripWidth,
+                content.getHeight());
 
-            g.setColour (panelDark.withAlpha (0.54f));
-            g.fillRoundedRectangle (strip.toFloat(), 3.0f);
-            g.setColour (panelLine);
-            g.drawRoundedRectangle (strip.toFloat(), 3.0f, 1.0f);
+            g.setColour (
+                lfoColours[static_cast<size_t> (i)]);
 
-            g.setColour (accent.withAlpha (0.72f));
-            g.fillRect (strip.getX() + 12, strip.getY() + 47,
-                        strip.getWidth() - 24, 2);
+            g.fillRoundedRectangle (
+                strip.toFloat(),
+                13.0f);
+
+            g.setColour (
+                lfoColours[static_cast<size_t> (i)]
+                    .darker (0.18f)
+                    .withAlpha (0.55f));
+
+            g.drawRoundedRectangle (
+                strip.toFloat().reduced (0.5f),
+                13.0f,
+                1.0f);
+
+            g.setColour (inkDim.withAlpha (0.60f));
+
+            auto wave = strip.reduced (30);
+            wave.removeFromTop (
+                juce::jmax (0, wave.getHeight() - 70));
+
+            juce::Path p;
+            const float midY =
+                static_cast<float> (wave.getCentreY());
+
+            p.startNewSubPath (
+                static_cast<float> (wave.getX()),
+                midY);
+
+            const int points = 64;
+
+            for (int k = 1; k < points; ++k)
+            {
+                const float norm =
+                    static_cast<float> (k)
+                    / static_cast<float> (points - 1);
+
+                float y = 0.0f;
+
+                if (i == 0)
+                {
+                    y = std::sin (
+                        norm * juce::MathConstants<float>::twoPi * 2.0f);
+                }
+                else if (i == 1)
+                {
+                    const float phase =
+                        std::fmod (norm * 2.0f, 1.0f);
+
+                    y = 1.0f
+                        - 4.0f
+                        * std::abs (
+                            std::round (phase - 0.25f)
+                            - (phase - 0.25f));
+                }
+                else
+                {
+                    const int step =
+                        static_cast<int> (norm * 9.0f);
+
+                    y = static_cast<float> (
+                        ((step * 37) % 11) - 5) / 5.0f;
+                }
+
+                const float px =
+                    static_cast<float> (wave.getX())
+                    + norm * static_cast<float> (wave.getWidth());
+
+                const float py =
+                    midY - y * 22.0f;
+
+                p.lineTo (px, py);
+            }
+
+            g.strokePath (
+                p,
+                juce::PathStrokeType (1.6f));
         }
 
         g.setColour (inkDim);
-        g.setFont (juce::Font (juce::FontOptions (9.5f)));
-        g.drawText ("FREE-RUN MODULATION  /  DEPTH = +/- MACRO RANGE  /  GRAIN MOD READY",
-                    content.getX(), content.getBottom() - 20,
-                    content.getWidth(), 16,
-                    juce::Justification::centred, false);
-    }
+        g.setFont (
+            juce::Font (
+                juce::FontOptions (9.0f)));
 
-    g.setColour (inkDim.withAlpha (0.70f));
-    g.setFont (juce::Font (juce::FontOptions (9.0f)));
-    g.drawText ("v0.3", getWidth() - 66, getHeight() - 23, 42, 14,
-                juce::Justification::centredRight, false);
+        g.drawText (
+            "LFO TARGETS: AGE / MELT / GRAIN / GHOST / SMEAR / CHAOS",
+            content.getX(),
+            content.getBottom() - 16,
+            content.getWidth(),
+            14,
+            juce::Justification::centred,
+            false);
+    }
 }
 
-void AngelEngineAudioProcessorEditor::resized()
+void IngeniumAudioProcessorEditor::resized()
 {
-    mainButton.setBounds (getWidth() - 190, 22, 68, 32);
-    modButton.setBounds  (getWidth() - 112, 22, 68, 32);
+    mainButton.setBounds (
+        getWidth() - 202,
+        24,
+        72,
+        38);
 
-    auto content = getLocalBounds().reduced (28);
+    modButton.setBounds (
+        getWidth() - 120,
+        24,
+        72,
+        38);
+
+    auto content = getLocalBounds().reduced (34);
     content.removeFromTop (72);
-    content.removeFromBottom (20);
 
     if (! modPageVisible)
     {
-        const int gap = 12;
-        const int groupWidth = (content.getWidth() - gap * 3) / 4;
+        auto output = content.removeFromBottom (142);
+        content.removeFromBottom (12);
 
-        std::array<juce::Rectangle<int>, 4> groups;
-        for (int group = 0; group < 4; ++group)
+        const int gap = 12;
+        const int columnWidth =
+            (content.getWidth() - gap * 2) / 3;
+
+        const int rowHeight =
+            (content.getHeight() - gap) / 2;
+
+        for (int i = 0; i < 6; ++i)
         {
-            groups[static_cast<size_t> (group)] = juce::Rectangle<int> (
-                content.getX() + group * (groupWidth + gap),
-                content.getY(), groupWidth, content.getHeight());
+            const int col = i % 3;
+            const int row = i / 3;
+
+            auto card = juce::Rectangle<int> (
+                content.getX() + col * (columnWidth + gap),
+                content.getY() + row * (rowHeight + gap),
+                columnWidth,
+                rowHeight);
+
+            card.reduce (12, 42);
+
+            mainLabels[static_cast<size_t> (i)].setBounds (
+                card.removeFromBottom (22));
+
+            mainKnobs[static_cast<size_t> (i)].setBounds (
+                card.reduced (8, 3));
         }
 
-        const std::array<std::array<int, 2>, 4> groupMap {{
-            {{0, 1}}, // AGE / AIR
-            {{2, 3}}, // MELT / GRAIN
-            {{4, 5}}, // GHOST / WIDTH
-            {{6, 7}}  // CHAOS / MIX
-        }};
+        auto outputInner = output.reduced (26, 24);
+        outputInner.removeFromTop (12);
 
-        for (int group = 0; group < 4; ++group)
+        const int third = outputInner.getWidth() / 3;
+
+        for (int i = 0; i < 3; ++i)
         {
-            auto inner = groups[static_cast<size_t> (group)].reduced (10, 36);
-            const int half = inner.getWidth() / 2;
+            auto cell = juce::Rectangle<int> (
+                outputInner.getX() + i * third,
+                outputInner.getY(),
+                third,
+                outputInner.getHeight());
 
-            for (int slot = 0; slot < 2; ++slot)
-            {
-                const int knobIndex = groupMap[static_cast<size_t> (group)][static_cast<size_t> (slot)];
-                auto cell = juce::Rectangle<int> (
-                    inner.getX() + slot * half,
-                    inner.getY(), half, inner.getHeight());
+            auto labelArea = cell.removeFromBottom (20);
 
-                auto labelArea = cell.removeFromBottom (30);
-                mainLabels[static_cast<size_t> (knobIndex)].setBounds (labelArea);
+            mainLabels[static_cast<size_t> (6 + i)]
+                .setBounds (labelArea);
 
-                if (knobIndex == 2 || knobIndex == 3)
-                    mainKnobs[static_cast<size_t> (knobIndex)].setBounds (cell.expanded (4, 7));
-                else
-                    mainKnobs[static_cast<size_t> (knobIndex)].setBounds (cell.reduced (1, 8));
-            }
+            mainKnobs[static_cast<size_t> (6 + i)]
+                .setBounds (cell.reduced (24, 2));
         }
     }
     else
     {
         const int gap = 16;
-        const int stripWidth = (content.getWidth() - gap * 2) / 3;
+        const int stripWidth =
+            (content.getWidth() - gap * 2) / 3;
 
         for (int i = 0; i < 3; ++i)
         {
             auto strip = juce::Rectangle<int> (
                 content.getX() + i * (stripWidth + gap),
-                content.getY(), stripWidth, content.getHeight()).reduced (14);
+                content.getY(),
+                stripWidth,
+                content.getHeight())
+                .reduced (18);
 
-            lfoLabels[static_cast<size_t> (i)].setBounds (strip.removeFromTop (34));
-            strip.removeFromTop (14);
+            lfoLabels[static_cast<size_t> (i)]
+                .setBounds (strip.removeFromTop (34));
 
-            auto knobsArea = strip.removeFromTop (190);
+            strip.removeFromTop (10);
+
+            auto knobsArea = strip.removeFromTop (245);
             const int half = knobsArea.getWidth() / 2;
 
-            auto rateArea = knobsArea.removeFromLeft (half).reduced (4, 0);
-            auto depthArea = knobsArea.reduced (4, 0);
+            auto rateArea =
+                knobsArea.removeFromLeft (half).reduced (4, 0);
 
-            rateLabels[static_cast<size_t> (i)].setBounds (rateArea.removeFromBottom (24));
-            depthLabels[static_cast<size_t> (i)].setBounds (depthArea.removeFromBottom (24));
-            rateKnobs[static_cast<size_t> (i)].setBounds (rateArea);
-            depthKnobs[static_cast<size_t> (i)].setBounds (depthArea);
+            auto depthArea =
+                knobsArea.reduced (4, 0);
 
-            strip.removeFromTop (8);
+            rateLabels[static_cast<size_t> (i)]
+                .setBounds (rateArea.removeFromBottom (24));
 
-            auto shapeRow = strip.removeFromTop (56);
-            shapeLabels[static_cast<size_t> (i)].setBounds (shapeRow.removeFromTop (18));
-            shapeBoxes[static_cast<size_t> (i)].setBounds (shapeRow.reduced (14, 1));
+            depthLabels[static_cast<size_t> (i)]
+                .setBounds (depthArea.removeFromBottom (24));
+
+            rateKnobs[static_cast<size_t> (i)]
+                .setBounds (rateArea);
+
+            depthKnobs[static_cast<size_t> (i)]
+                .setBounds (depthArea);
 
             strip.removeFromTop (6);
 
-            auto targetRow = strip.removeFromTop (56);
-            targetLabels[static_cast<size_t> (i)].setBounds (targetRow.removeFromTop (18));
-            targetBoxes[static_cast<size_t> (i)].setBounds (targetRow.reduced (14, 1));
+            auto shapeRow = strip.removeFromTop (64);
+
+            shapeLabels[static_cast<size_t> (i)]
+                .setBounds (shapeRow.removeFromTop (18));
+
+            shapeBoxes[static_cast<size_t> (i)]
+                .setBounds (shapeRow.reduced (10, 2));
+
+            strip.removeFromTop (4);
+
+            auto targetRow = strip.removeFromTop (64);
+
+            targetLabels[static_cast<size_t> (i)]
+                .setBounds (targetRow.removeFromTop (18));
+
+            targetBoxes[static_cast<size_t> (i)]
+                .setBounds (targetRow.reduced (10, 2));
         }
     }
 }

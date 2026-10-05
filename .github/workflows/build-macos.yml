@@ -1,4 +1,4 @@
-name: Build ANGEL ENGINE macOS
+name: Build INGENIUM macOS
 
 on:
   push:
@@ -21,18 +21,18 @@ jobs:
           -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
 
       - name: Build VST3 and AU
-        run: cmake --build build --config Release --target AngelEngine_VST3 AngelEngine_AU
+        run: cmake --build build --config Release --target Ingenium_VST3 Ingenium_AU
 
       - name: Package plugins
         run: |
           mkdir -p package/VST3
           mkdir -p package/AU
-          cp -R "build/AngelEngine_artefacts/Release/VST3/ANGEL ENGINE.vst3" package/VST3/
-          cp -R "build/AngelEngine_artefacts/Release/AU/ANGEL ENGINE.component" package/AU/
+          cp -R "build/Ingenium_artefacts/Release/VST3/INGENIUM.vst3" package/VST3/
+          cp -R "build/Ingenium_artefacts/Release/AU/INGENIUM.component" package/AU/
 
       - name: Upload macOS plugins
         uses: actions/upload-artifact@v4
         with:
-          name: ANGEL-ENGINE-macOS-universal
+          name: INGENIUM-v0.4-macOS-universal
           path: package/
           if-no-files-found: error

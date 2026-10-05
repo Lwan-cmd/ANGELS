@@ -6,52 +6,63 @@
 #include <array>
 #include <memory>
 
-class AngelEngineAudioProcessorEditor final : public juce::AudioProcessorEditor
+class IngeniumAudioProcessorEditor final : public juce::AudioProcessorEditor
 {
 public:
-    explicit AngelEngineAudioProcessorEditor (AngelEngineAudioProcessor&);
-    ~AngelEngineAudioProcessorEditor() override;
+    explicit IngeniumAudioProcessorEditor (IngeniumAudioProcessor&);
+    ~IngeniumAudioProcessorEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ComboAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using SliderAttachment =
+        juce::AudioProcessorValueTreeState::SliderAttachment;
+
+    using ComboAttachment =
+        juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     void showMainPage();
     void showModPage();
     void updatePageVisibility();
     void styleKnob (juce::Slider& slider);
-    void styleLabel (juce::Label& label, const juce::String& text, float size = 12.0f);
+    void styleLabel (juce::Label& label,
+                     const juce::String& text,
+                     float size = 12.0f);
 
-    AngelEngineAudioProcessor& audioProcessor;
-    AngelAnalogLookAndFeel analogLook;
+    IngeniumAudioProcessor& audioProcessor;
+    IngeniumLookAndFeel ingeniumLook;
 
     bool modPageVisible = false;
 
     juce::TextButton mainButton { "MAIN" };
     juce::TextButton modButton { "MOD" };
 
-    std::array<juce::Slider, 8> mainKnobs;
-    std::array<juce::Label, 8> mainLabels;
-    std::array<std::unique_ptr<SliderAttachment>, 8> mainAttachments;
+    std::array<juce::Slider, 9> mainKnobs;
+    std::array<juce::Label, 9> mainLabels;
+    std::array<std::unique_ptr<SliderAttachment>, 9> mainAttachments;
 
-    const std::array<juce::String, 8> mainParameterIDs {
-        "age", "air", "melt", "grain", "ghost", "width", "chaos", "mix"
+    const std::array<juce::String, 9> mainParameterIDs {
+        "age", "melt", "grain",
+        "ghost", "smear", "chaos",
+        "air", "width", "mix"
     };
 
-    const std::array<juce::String, 8> mainParameterNames {
-        "AGE", "AIR", "MELT", "GRAIN", "GHOST", "WIDTH", "CHAOS", "MIX"
+    const std::array<juce::String, 9> mainParameterNames {
+        "AGE", "MELT", "GRAIN",
+        "GHOST", "SMEAR", "CHAOS",
+        "AIR", "WIDTH", "MIX"
     };
 
     std::array<juce::Slider, 3> rateKnobs;
     std::array<juce::Slider, 3> depthKnobs;
+
     std::array<juce::Label, 3> lfoLabels;
     std::array<juce::Label, 3> rateLabels;
     std::array<juce::Label, 3> depthLabels;
     std::array<juce::Label, 3> shapeLabels;
     std::array<juce::Label, 3> targetLabels;
+
     std::array<juce::ComboBox, 3> shapeBoxes;
     std::array<juce::ComboBox, 3> targetBoxes;
 
@@ -60,5 +71,5 @@ private:
     std::array<std::unique_ptr<ComboAttachment>, 3> shapeAttachments;
     std::array<std::unique_ptr<ComboAttachment>, 3> targetAttachments;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AngelEngineAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (IngeniumAudioProcessorEditor)
 };
